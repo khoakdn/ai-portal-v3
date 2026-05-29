@@ -64,7 +64,7 @@ export async function getTaskDetail(taskId: string): Promise<{
 
     const latest_feedback = activityRows?.[0]?.feedback_text ?? null;
 
-    const cd = data.content_drafts as {
+    const cd = (data.content_drafts as unknown) as {
       id: string;
       type: string;
       edited_body: string | null;

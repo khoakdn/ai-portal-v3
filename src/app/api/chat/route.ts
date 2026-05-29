@@ -54,7 +54,7 @@ function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
         if (att.contentType.startsWith("image/")) {
           return { type: "image" as const, image: base64, mimeType };
         }
-        return { type: "file" as const, data: base64, mimeType };
+        return { type: "file" as const, data: base64, mediaType: mimeType };
       }),
     ];
 

@@ -28,6 +28,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   pending_approval: "Pending Approval",
   approved: "Approved",
   rejected: "Rejected",
+  needs_revisions: "Needs Revisions",
 };
 
 const STATUS_EMOJI: Record<TaskStatus, string> = {
@@ -35,6 +36,7 @@ const STATUS_EMOJI: Record<TaskStatus, string> = {
   pending_approval: "⏳",
   approved: "✅",
   rejected: "❌",
+  needs_revisions: "🔄",
 };
 
 const TYPE_LABELS: Record<TaskType, string> = {
