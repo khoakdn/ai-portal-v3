@@ -10,12 +10,12 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Bot,
   Calendar,
   CheckCircle2,
   ChevronRight,
   Eye,
   FileText,
-  Globe2,
   Loader2,
   Megaphone,
   RotateCcw,
@@ -25,8 +25,10 @@ import {
   Star,
   Trophy,
   Users,
+  Zap,
 } from "lucide-react";
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
+import { triggerPressReleaseAgent } from "@/actions/relevance/trigger-press-release-agent";
 import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
 import { DocumentSkeleton } from "@/components/ui/skeleton-loader";
 import { Button } from "@/components/ui/button";
@@ -126,11 +128,16 @@ const PRIORITIES = ["High", "Medium", "Low"];
 // Step tracker
 // ─────────────────────────────────────────────────────────────────────────────
 
-type WizardPhase = "select-type" | "fill-form" | "review" | "saved";
+type WizardPhase = "select-type" | "fill-form" | "review" | "saved" | "agent-submitted";
 
 interface SavedState {
   taskId: string;
   mode: "draft" | "pending_approval";
+  simulated?: boolean;
+}
+
+interface AgentSubmittedState {
+  jobId: string;
   simulated?: boolean;
 }
 
@@ -353,17 +360,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 interface DetailedFormProps {
   selectedType: PressReleaseType;
   onBack: () => void;
-  onGenerate: (title: string, ctx: PressReleaseStructuredContext) => void;
-  isGenerating: boolean;
-  generateError: string | null;
+  onAgentTrigger: (title: string, ctx: PressReleaseStructuredContext) => void;
+  isTriggering: boolean;
+  triggerError: string | null;
 }
 
 function DetailedForm({
   selectedType,
   onBack,
-  onGenerate,
-  isGenerating,
-  generateError,
+  onAgentTrigger,
+  isTriggering,
+  triggerError,
 }: DetailedFormProps) {
   const {
     register,
@@ -405,7 +412,7 @@ function DetailedForm({
       existingSystems:   data.existingSystems || undefined,
       testReports:       data.testReports || undefined,
     };
-    onGenerate(data.title, ctx);
+    onAgentTrigger(data.title, ctx);
   }
 
   const Icon = selectedType.icon;
@@ -675,47 +682,79 @@ function DetailedForm({
           </div>
 
           {/* Error */}
-          {generateError && (
+          {triggerError && (
             <div className="flex items-start gap-2.5 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700" role="alert">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {generateError}
+              {triggerError}
             </div>
           )}
 
           {/* Submit */}
-          <Button type="submit" disabled={isGenerating} className="w-full" size="lg">
-            {isGenerating
-              ? <><Loader2 className="h-4 w-4 animate-spin" />Generating with AI…</>
-              : <><Sparkles className="h-4 w-4" />Generate Press Release</>}
+          <Button type="submit" disabled={isTriggering} className="w-full" size="lg">
+            {isTriggering
+              ? <><Loader2 className="h-4 w-4 animate-spin" />Sending to AI Agent…</>
+              : <><Zap className="h-4 w-4" />Send to AI Agent</>}
           </Button>
         </div>
 
-        {/* ── Right: Live preview ─────────────────────────────── */}
-        <div className="flex flex-col gap-5">
-          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 px-7 py-5">
-              <div className="flex items-center gap-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[11px] font-bold text-slate-500">
-                  2
-                </span>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-slate-800">Live Preview</h2>
-                  <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
-                    <Eye className="h-2.5 w-2.5" />
-                    Newsroom Wire
-                  </span>
-                </div>
+        {/* ── Right: Agent info panel ──────────────────────────── */}
+        <div className="flex flex-col gap-4">
+          {/* What happens next */}
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0087DC]/10">
+                <Bot className="h-5 w-5 text-[#0087DC]" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Relevance AI Agent</p>
+                <p className="text-[11px] text-slate-500">Your dedicated press release writer</p>
               </div>
             </div>
-            <div className="p-5">
-              <PressReleasePreview
-                title=""
-                body=""
-                onChange={() => {}}
-                isEditable={false}
-                isGenerating={isGenerating}
-              />
+            <div className="space-y-3">
+              {[
+                { step: "1", label: "Your brief is formatted into a structured Markdown prompt" },
+                { step: "2", label: "The agent receives all fields: type, region, products, benefits, and more" },
+                { step: "3", label: "The AI agent generates a polished, publication-ready draft" },
+                { step: "4", label: "You can review and track the output in your Relevance AI workspace" },
+              ].map(({ step, label }) => (
+                <div key={step} className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0087DC] text-[10px] font-bold text-white">
+                    {step}
+                  </span>
+                  <p className="text-[13px] leading-snug text-slate-600">{label}</p>
+                </div>
+              ))}
             </div>
+          </div>
+
+          {/* Fields summary */}
+          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
+              Fields sent to agent
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                "Article Title", "Type", "Region", "Language",
+                "Business Unit", "Priority", "Deadline",
+                "Thematic Focus", "Products / Solutions",
+                "Product Description", "Contact Person",
+                "Info Links", "Existing Systems", "Test Reports",
+              ].map((field) => (
+                <span key={field} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                  {field}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Trigger hint */}
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
+            <Zap className="mx-auto mb-2 h-5 w-5 text-slate-300" />
+            <p className="text-[12px] text-slate-400">
+              Fill all required fields and click{" "}
+              <span className="font-semibold text-slate-600">Send to AI Agent</span>{" "}
+              to trigger the Relevance AI workflow.
+            </p>
           </div>
         </div>
       </div>
@@ -844,46 +883,50 @@ function ReviewPhase({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function PressReleaseStudio() {
-  const [phase, setPhase]             = useState<WizardPhase>("select-type");
+  const [phase, setPhase]               = useState<WizardPhase>("select-type");
   const [selectedType, setSelectedType] = useState<PressReleaseType | null>(null);
   const [currentTitle, setCurrentTitle] = useState("");
-  const [currentCtx, setCurrentCtx]   = useState<PressReleaseStructuredContext | null>(null);
-  const [draftBody, setDraftBody]     = useState("");
-  const [isSimulated, setIsSimulated] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
-  const [saveError, setSaveError]     = useState<string | null>(null);
-  const [saved, setSaved]             = useState<SavedState | null>(null);
+  const [currentCtx, setCurrentCtx]     = useState<PressReleaseStructuredContext | null>(null);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [agentResult, setAgentResult]   = useState<AgentSubmittedState | null>(null);
 
-  const [isGenerating, startGenerate] = useTransition();
-  const [isSaving,     startSave]     = useTransition();
-  const [isSubmitting, startSubmit]   = useTransition();
+  // Kept for the review phase (Gemini fallback path — accessible via ReviewPhase)
+  const [draftBody, setDraftBody]   = useState("");
+  const [isSimulated, setIsSimulated] = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [saved, setSaved]           = useState<SavedState | null>(null);
+
+  const [isTriggering, startTrigger] = useTransition();
+  const [isSaving,     startSave]    = useTransition();
+  const [isSubmitting, startSubmit]  = useTransition();
 
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
+    setTriggerError(null);
     setPhase("fill-form");
   }
 
-  function handleGenerate(title: string, ctx: PressReleaseStructuredContext) {
-    setGenerateError(null);
+  // ── Primary path: send form to Relevance AI agent ──────────────────────
+  function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
+    setTriggerError(null);
     setCurrentTitle(title);
     setCurrentCtx(ctx);
-    startGenerate(async () => {
-      const result = await generatePressRelease({
+    startTrigger(async () => {
+      const result = await triggerPressReleaseAgent({
         title,
-        bulletPoints: ctx.thematicFocus,
-        contentType: "press_release",
-        structuredContext: ctx,
+        pressReleaseType: ctx.pressReleaseType,
+        context: ctx,
       });
-      if (result.success && result.draft) {
-        setDraftBody(result.draft);
-        setIsSimulated(result.simulated ?? false);
-        setPhase("review");
+      if (result.success) {
+        setAgentResult({ jobId: result.jobId ?? "triggered", simulated: result.simulated });
+        setPhase("agent-submitted");
       } else {
-        setGenerateError(result.error ?? "Generation failed. Please try again.");
+        setTriggerError(result.error ?? "Failed to trigger the agent. Please try again.");
       }
     });
   }
 
+  // ── Secondary path: Gemini generate (still available in review phase) ──
   function handleSaveAsDraft() {
     setSaveError(null);
     startSave(async () => {
@@ -929,12 +972,105 @@ export function PressReleaseStudio() {
     setCurrentCtx(null);
     setDraftBody("");
     setIsSimulated(false);
-    setGenerateError(null);
+    setTriggerError(null);
     setSaveError(null);
     setSaved(null);
+    setAgentResult(null);
   }
 
-  // ── Saved ─────────────────────────────────────────────────────────────
+  // ── Agent submitted confirmation ───────────────────────────────────────
+  if (phase === "agent-submitted" && agentResult) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-full max-w-md animate-fade-in">
+          {/* Success icon */}
+          <div className="mb-6 flex flex-col items-center text-center">
+            <div className="relative mb-5">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#0087DC]/10 ring-8 ring-[#0087DC]/5">
+                <Bot className="h-10 w-10 text-[#0087DC]" />
+              </div>
+              <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 shadow-md">
+                <CheckCircle2 className="h-4 w-4 text-white" />
+              </span>
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+              Agent Triggered!
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-500">
+              Your press release brief has been sent to the Relevance AI agent.
+              The agent is now processing your request.
+            </p>
+            {agentResult.simulated && (
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                ⚡ Simulation Mode — add Relevance AI credentials to activate live agent
+              </p>
+            )}
+          </div>
+
+          {/* Job ID card */}
+          <div className="mb-6 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
+              Submission Details
+            </p>
+            <div className="space-y-2.5 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Press Release Type</span>
+                <span className="font-semibold text-slate-800">{selectedType?.label}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Title</span>
+                <span className="max-w-[180px] truncate text-right font-semibold text-slate-800">
+                  {currentTitle}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-t border-slate-100 pt-2.5">
+                <span className="text-slate-500">Job / Session ID</span>
+                <code className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">
+                  {agentResult.jobId}
+                </code>
+              </div>
+            </div>
+          </div>
+
+          {/* Next steps */}
+          <div className="mb-6 rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-blue-400">
+              What happens next
+            </p>
+            <ul className="space-y-1.5 text-[13px] text-blue-700">
+              <li className="flex items-start gap-2">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                The Relevance AI agent is generating your draft
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Review the output in your Relevance AI workspace
+              </li>
+              <li className="flex items-start gap-2">
+                <SendHorizonal className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Copy the draft back here to submit it for approval
+              </li>
+            </ul>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-col gap-2.5 sm:flex-row">
+            <Button asChild size="lg" className="flex-1">
+              <Link href="/dashboard">
+                Back to Dashboard
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button variant="outline" size="lg" className="flex-1" onClick={handleStartOver}>
+              Create Another
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Saved (Gemini path) ────────────────────────────────────────────────
   if (phase === "saved" && saved) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -976,9 +1112,9 @@ export function PressReleaseStudio() {
         <DetailedForm
           selectedType={selectedType}
           onBack={() => setPhase("select-type")}
-          onGenerate={handleGenerate}
-          isGenerating={isGenerating}
-          generateError={generateError}
+          onAgentTrigger={handleAgentTrigger}
+          isTriggering={isTriggering}
+          triggerError={triggerError}
         />
       )}
 
