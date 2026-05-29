@@ -7,6 +7,24 @@ export interface GeneratePressReleaseInput {
   title: string;
   bulletPoints: string;
   contentType?: ContentType;
+  /** Optional structured context from the press-release wizard */
+  structuredContext?: PressReleaseStructuredContext;
+}
+
+export interface PressReleaseStructuredContext {
+  pressReleaseType: string;
+  region?: string;
+  language?: string;
+  businessUnit?: string;
+  priority?: string;
+  deadline?: string;
+  thematicFocus: string;
+  productsToAddress: string;
+  infoMaterialLinks?: string;
+  contactPerson?: string;
+  productDescription: string;
+  existingSystems?: string;
+  testReports?: string;
 }
 
 export interface GeneratePressReleaseResult {
@@ -135,15 +153,69 @@ ${hashtags}
 
 /* ── Server Action ────────────────────────────────────────────────────── */
 
+/** Build a rich structured prompt when the wizard form is used */
+function buildStructuredPrompt(
+  title: string,
+  ctx: NonNullable<GeneratePressReleaseInput["structuredContext"]>
+): string {
+  const lines: string[] = [
+    `You are an expert corporate communications writer specialising in technology press releases and media content.`,
+    ``,
+    `Generate a professional ${ctx.pressReleaseType} based on the following structured brief. Use wire-service format, clear professional language, and expand the brief into compelling narrative paragraphs.`,
+    `Output plain text only — no markdown.`,
+    ``,
+    `=== DOCUMENT BRIEF ===`,
+    `Type: ${ctx.pressReleaseType}`,
+    `Title: ${title}`,
+  ];
+
+  if (ctx.region)       lines.push(`Region: ${ctx.region}`);
+  if (ctx.language)     lines.push(`Language: ${ctx.language}`);
+  if (ctx.businessUnit) lines.push(`Business Unit: ${ctx.businessUnit}`);
+  if (ctx.priority)     lines.push(`Priority: ${ctx.priority}`);
+  if (ctx.deadline)     lines.push(`Publication Deadline: ${ctx.deadline}`);
+
+  lines.push(
+    ``,
+    `=== CONTENT BRIEF ===`,
+    `Thematic Focus / Content Points:`,
+    ctx.thematicFocus,
+    ``,
+    `Delta Products / Solutions to Address:`,
+    ctx.productsToAddress,
+    ``,
+    `Product Description & Benefits:`,
+    ctx.productDescription,
+  );
+
+  if (ctx.contactPerson) {
+    lines.push(``, `Contact Person for Product Questions: ${ctx.contactPerson}`);
+  }
+  if (ctx.infoMaterialLinks) {
+    lines.push(``, `Information Material & Image Links: ${ctx.infoMaterialLinks}`);
+  }
+  if (ctx.existingSystems) {
+    lines.push(``, `Existing Systems to Consider / Integrate / Replace:`, ctx.existingSystems);
+  }
+  if (ctx.testReports) {
+    lines.push(``, `Test Reports / Performance Results:`, ctx.testReports);
+  }
+
+  lines.push(``, `=== END BRIEF ===`, ``, `Generate the ${ctx.pressReleaseType} now.`);
+  return lines.join("\n");
+}
+
 export async function generatePressRelease(
   input: GeneratePressReleaseInput
 ): Promise<GeneratePressReleaseResult> {
-  const { title, bulletPoints, contentType = "press_release" } = input;
+  const { title, bulletPoints, contentType = "press_release", structuredContext } = input;
 
   if (!title.trim()) {
     return { success: false, error: "Title is required" };
   }
-  if (!bulletPoints.trim()) {
+
+  // When no structured context, bullet points are required
+  if (!structuredContext && !bulletPoints.trim()) {
     return { success: false, error: "Please provide at least one bullet point" };
   }
 
@@ -152,11 +224,11 @@ export async function generatePressRelease(
     console.info(
       "[generatePressRelease] GEMINI_API_KEY not set — returning simulated draft."
     );
-    await delay(1800); // realistic AI "thinking" pause
+    await delay(1800);
 
     const draft =
       contentType === "press_release"
-        ? buildSimulatedPressRelease(title, bulletPoints)
+        ? buildSimulatedPressRelease(title, structuredContext?.thematicFocus ?? bulletPoints)
         : buildSimulatedSocialPost(title, bulletPoints);
 
     return { success: true, draft, simulated: true };
@@ -165,31 +237,15 @@ export async function generatePressRelease(
   // ── Live Gemini generation ─────────────────────────────────────────────
   try {
     const ai = getGeminiClient();
-    const systemPrompt = CONTENT_PROMPTS[contentType];
+
+    const userText = structuredContext
+      ? buildStructuredPrompt(title, structuredContext)
+      : `${CONTENT_PROMPTS[contentType]}\n\nTitle: ${title}\n\nBullet Points:\n${bulletPoints}\n\nGenerate the ${contentType === "press_release" ? "press release" : "social media posts"} now.`;
 
     const response = await ai.models.generateContent({
       model: GEMINI_MODELS.content,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `${systemPrompt}
-
-Title: ${title}
-
-Bullet Points:
-${bulletPoints}
-
-Generate the ${contentType === "press_release" ? "press release" : "social media posts"} now.`,
-            },
-          ],
-        },
-      ],
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      },
+      contents: [{ role: "user", parts: [{ text: userText }] }],
+      config: { temperature: 0.7, maxOutputTokens: 2048 },
     });
 
     const draft = response.text?.trim();
