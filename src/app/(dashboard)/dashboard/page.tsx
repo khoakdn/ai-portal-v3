@@ -18,30 +18,67 @@ import { getTasksForBoard } from "@/actions/tasks/get-tasks";
 import type { TaskRow } from "@/actions/tasks/get-tasks";
 import { formatRelativeTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { AiChatBox } from "@/components/dashboard/ai-chat-box";
-
 /* ═══════════════════════════════════════════════════════════════
-   § 1 — HERO GREETING + AI CHATBOX
+   § 1 — DELTANAV ACTIVE AGENT HERO
    ═══════════════════════════════════════════════════════════════ */
 
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
+const AGENT_IFRAME_SRC =
+  "https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/23efc695-a036-4761-8330-ac445e61051b/share?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=icon&primary_color=%230087dc&bubble_icon=sparkle&input_placeholder_text=Type+your+message...&hide_logo=false&hide_description=false";
 
-function HeroGreeting({ pendingCount }: { pendingCount: number }) {
-  const greeting = getGreeting();
+function DeltaNavHero({ pendingCount }: { pendingCount: number }) {
   const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
+    weekday: "short",
     month: "long",
     day: "numeric",
     year: "numeric",
   });
 
   return (
-    <AiChatBox greeting={greeting} today={today} pendingCount={pendingCount} />
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+      {/* ── Header strip ── */}
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5">
+
+        {/* Left: pulse + title + date */}
+        <div className="flex items-center gap-3">
+          {/* Delta Tertiary Green live pulse */}
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a7d33f] opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#a7d33f]" />
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] font-semibold text-slate-800">DeltaNav Active Agent</span>
+            <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#0087DC]">
+              Live
+            </span>
+          </div>
+          <span className="hidden text-[11px] text-slate-400 sm:block">{today}</span>
+        </div>
+
+        {/* Right: pending badge */}
+        {pendingCount > 0 && (
+          <Link
+            href="/tasks"
+            className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+          >
+            <Clock3 className="h-3 w-3" aria-hidden="true" />
+            {pendingCount} pending
+          </Link>
+        )}
+      </div>
+
+      {/* ── Iframe body ── */}
+      <div className="h-[500px] w-full">
+        <iframe
+          src={AGENT_IFRAME_SRC}
+          title="DeltaNav Active Agent"
+          width="100%"
+          height="100%"
+          allow="microphone"
+          className="rounded-b-2xl border-0"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -446,8 +483,8 @@ function RecentActivityFeed({ tasks }: { tasks: TaskRow[] }) {
 function DashboardSkeleton() {
   return (
     <div className="space-y-10 animate-pulse">
-      {/* Hero */}
-      <div className="h-36 rounded-2xl bg-slate-100" />
+      {/* Hero agent */}
+      <div className="h-[548px] rounded-2xl bg-slate-100" />
 
       {/* Stat cards */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
@@ -491,8 +528,8 @@ async function DashboardContent() {
 
   return (
     <div className="space-y-10">
-      {/* 1 — Hero greeting */}
-      <HeroGreeting pendingCount={pendingCount} />
+      {/* 1 — DeltaNav hero agent */}
+      <DeltaNavHero pendingCount={pendingCount} />
 
       {/* 2 — Metric cards */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
