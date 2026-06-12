@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VALID_CATEGORIES } from "@/lib/budget/data";
 
 export const lineItemSchema = z.object({
   description: z
@@ -52,6 +53,20 @@ export const invoiceSchema = z.object({
   lineItems: z
     .array(lineItemSchema)
     .describe("All line items listed on the invoice"),
+  inferredCategory: z
+    .enum(VALID_CATEGORIES)
+    .describe(
+      `The marketing budget category that best matches this invoice. Must be exactly one of: ${VALID_CATEGORIES.join(", ")}`
+    ),
+  inferredSubCategory: z
+    .string()
+    .nullable()
+    .describe(
+      "The sub-category within the inferred category, or null if not applicable. " +
+      "National Marketing → Banner Ads; " +
+      "Public Relations → Events | Press Releases | Conferences | Webinars; " +
+      "Social Media → LinkedIn | Facebook"
+    ),
 });
 
 export type InvoiceSchema = z.infer<typeof invoiceSchema>;

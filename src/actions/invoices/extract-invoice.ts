@@ -61,14 +61,16 @@ function buildTaskDescription(data: InvoiceSchema): string {
  * All downstream DB writes and notifications fire exactly as with a live API call.
  */
 const SIMULATED_INVOICE: InvoiceSchema = {
-  vendorName:    "Global Tech Logistics Ltd",
-  invoiceNumber: "GTL-2026-04821",
-  invoiceDate:   "2026-05-28",
-  dueDate:       "2026-06-28",
-  currency:      "USD",
-  totalAmount:   1450.00,
-  subtotal:      1250.00,
-  taxAmount:     200.00,
+  vendorName:          "Global Tech Logistics Ltd",
+  invoiceNumber:       "GTL-2026-04821",
+  invoiceDate:         "2026-05-28",
+  dueDate:             "2026-06-28",
+  currency:            "USD",
+  totalAmount:         1450.00,
+  subtotal:            1250.00,
+  taxAmount:           200.00,
+  inferredCategory:    "Public Relations",
+  inferredSubCategory: "Events",
   lineItems: [
     {
       description: "Corporate Event Marketing Strategy",
@@ -247,11 +249,22 @@ export async function extractInvoice(
           content: [
             {
               type: "text",
-              text: `You are an expert accounts-payable assistant. Extract all structured data from the invoice document below.
-Be precise with numbers — do not add currency symbols to numeric fields.
-Use YYYY-MM-DD format for all dates.
-If a field is not present on the document, return null for that field.
-Extract every line item visible on the invoice.`,
+              text: `You are an expert accounts-payable and marketing budget assistant.
+Extract all structured data from the invoice document below.
+
+Rules:
+- Be precise with numbers. Do not add currency symbols to numeric fields.
+- Use YYYY-MM-DD format for all dates.
+- If a field is not present on the document, return null for that field.
+- Extract every line item visible on the invoice.
+- For inferredCategory: classify this expense into exactly one of these marketing budget categories:
+  "National Marketing", "Local Marketing", "Public Relations", "Content Marketing", "Social Media"
+  Base your choice on the vendor name, line item descriptions, and overall invoice purpose.
+- For inferredSubCategory: if applicable, pick the most relevant sub-category:
+  National Marketing → "Banner Ads"
+  Public Relations   → "Events" | "Press Releases" | "Conferences" | "Webinars"
+  Social Media       → "LinkedIn" | "Facebook"
+  Otherwise return null.`,
             },
             {
               type: "file",
