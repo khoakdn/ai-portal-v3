@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { AppHeader } from "@/components/layout/app-header";
+import { FloatingCopilot } from "@/components/layout/floating-copilot";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -17,6 +18,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         </main>
       </div>
+
+      {/* Global floating copilot widget — renders above all layout grids */}
+      <FloatingCopilot />
     </div>
   );
 }
