@@ -172,7 +172,7 @@ function FormSelect({
         className={cn(
           "w-full appearance-none rounded-lg border px-3 py-2 pr-9 text-sm transition-all",
           "bg-white text-slate-900 shadow-sm outline-none",
-          "focus:border-[#0087DC] focus:ring-2 focus:ring-[#0087DC]/10",
+          "focus:border-[#02d5ce] focus:shadow-[0_0_0_3px_rgba(2,213,206,0.18)]",
           error ? "border-red-300 bg-red-50/50" : "border-slate-200",
           disabled && "cursor-not-allowed bg-slate-50 opacity-60",
           !value && "text-slate-400"
@@ -560,7 +560,7 @@ function DetailedForm({
                   {...register("deadline")}
                   className={cn(
                     "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none",
-                    "transition-all focus:border-[#0087DC] focus:ring-2 focus:ring-[#0087DC]/10"
+                    "transition-all focus:border-[#02d5ce] focus:shadow-[0_0_0_3px_rgba(2,213,206,0.18)] focus:outline-none"
                   )}
                 />
               </div>

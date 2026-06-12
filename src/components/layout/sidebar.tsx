@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -10,7 +11,6 @@ import {
   Share2,
   CheckSquare,
   Settings,
-  Megaphone,
   ChevronDown,
   Receipt,
 } from "lucide-react";
@@ -46,17 +46,22 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-[220px] flex-col border-r border-slate-200 bg-white">
 
-      {/* ── Logo ──────────────────────────────────────────── */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-100 px-5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0087DC] shadow-sm shadow-blue-200">
-          <Megaphone className="h-4 w-4 text-white" aria-hidden="true" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold leading-tight text-slate-900">
-            Marketing Portal
-          </p>
-          <p className="text-[11px] font-medium text-slate-400">Delta Team</p>
-        </div>
+      {/* ── Delta Logo ────────────────────────────────────── */}
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-100 px-5">
+        <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0">
+          <Image
+            src="https://www.delta-emea.com/images/logo.svg"
+            alt="Delta Electronics"
+            width={88}
+            height={28}
+            className="h-7 w-auto object-contain"
+            priority
+            unoptimized
+          />
+        </Link>
+        <span className="shrink-0 rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#0087DC]">
+          Portal
+        </span>
       </div>
 
       {/* ── Navigation ────────────────────────────────────── */}

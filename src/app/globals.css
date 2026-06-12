@@ -41,6 +41,13 @@
   --color-indigo-800: #00385e;
   --color-indigo-900: #001e33;
   --color-indigo-950: #000f1a;
+
+  /* ── Delta Electronics Corporate Identity palette ─────────────── */
+  --color-delta-primary:   #0087DC;   /* Delta Blue   */
+  --color-delta-secondary: #02d5ce;   /* Delta Teal   */
+  --color-delta-tertiary:  #a7d33f;   /* Delta Green  */
+
+  /* Expose as Tailwind utilities: delta-primary, delta-secondary, delta-tertiary */
 }
 
 /* ── Light mode — Linear-inspired ─────────────────────────────────────── */

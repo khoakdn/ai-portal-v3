@@ -13,9 +13,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           "flex h-10 w-full rounded-xl border bg-white px-3.5 py-2 text-sm",
           // Default border — soft slate
           "border-slate-200 text-slate-900 placeholder:text-slate-400",
-          // Focus — soft indigo glow instead of heavy ring
+          // Focus — Delta Secondary (teal) glow
           "transition-all duration-150 outline-none",
-          "focus:border-slate-400 focus:shadow-[0_0_0_3px_rgba(0,135,220,0.12)]",
+          "focus:border-[#02d5ce] focus:shadow-[0_0_0_3px_rgba(2,213,206,0.18)]",
           // File input
           "file:border-0 file:bg-transparent file:text-sm file:font-medium",
           // Disabled

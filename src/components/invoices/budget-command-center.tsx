@@ -213,7 +213,7 @@ function ChartPanel({
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
             <Bar dataKey="Budgeted" fill="#0087DC" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Actual"   fill="#34d399" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Actual"   fill="#02d5ce" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       )}
@@ -253,8 +253,8 @@ function ChartPanel({
                 <stop offset="95%" stopColor="#0087DC" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="gradSpent" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#34d399" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                <stop offset="5%" stopColor="#02d5ce" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#02d5ce" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -263,7 +263,7 @@ function ChartPanel({
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
             <Area type="monotone" dataKey="budgeted" name="Budgeted (cum.)" stroke="#0087DC" fill="url(#gradBudgeted)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="spent"    name="Actual (cum.)"   stroke="#34d399" fill="url(#gradSpent)"    strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="spent"    name="Actual (cum.)"   stroke="#02d5ce" fill="url(#gradSpent)"    strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       )}
@@ -314,7 +314,7 @@ function CategoryTable({
               <Progress
                 value={pct}
                 className="h-1.5"
-                indicatorClassName={over ? "bg-red-400" : pct > 80 ? "bg-amber-400" : "bg-[#0087DC]"}
+                indicatorClassName={over ? "bg-red-400" : pct > 85 ? "bg-amber-400" : "bg-[#a7d33f]"}
               />
               <div className="mt-1 flex justify-between text-[10px] text-slate-400">
                 <span>{pct}% used</span>
@@ -554,7 +554,7 @@ function ImpactBanner({
               value={newPct}
               className="h-2"
               indicatorClassName={
-                newPct >= 100 ? "bg-red-400" : newPct >= 85 ? "bg-amber-400" : "bg-[#0087DC]"
+                newPct >= 100 ? "bg-red-400" : newPct >= 85 ? "bg-amber-400" : "bg-[#a7d33f]"
               }
             />
           </div>
@@ -702,7 +702,7 @@ export function BudgetCommandCenter() {
           value={metrics.pct}
           className="h-3"
           indicatorClassName={
-            metrics.pct >= 100 ? "bg-red-400" : metrics.pct >= 85 ? "bg-amber-400" : "bg-[#0087DC]"
+            metrics.pct >= 100 ? "bg-red-400" : metrics.pct >= 85 ? "bg-amber-400" : "bg-[#a7d33f]"
           }
         />
         <div className="mt-2 flex justify-between text-[11px] text-slate-400">
