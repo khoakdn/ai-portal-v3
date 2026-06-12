@@ -14,6 +14,7 @@ import {
   Calendar,
   CheckCircle2,
   ChevronRight,
+  ExternalLink,
   Eye,
   FileText,
   Loader2,
@@ -739,6 +740,12 @@ function DetailedForm({
 // Review phase (after generation)
 // ─────────────────────────────────────────────────────────────────────────────
 
+interface SyncResult {
+  todoId?: number;
+  appUrl?: string;
+  simulated?: boolean;
+}
+
 interface ReviewPhaseProps {
   title: string;
   draftBody: string;
@@ -750,6 +757,12 @@ interface ReviewPhaseProps {
   saveError: string | null;
   onSaveAsDraft: () => void;
   onSubmitForApproval: () => void;
+  // Basecamp broadcast sync
+  isSyncing: boolean;
+  syncSuccess: boolean;
+  syncError: string | null;
+  syncResult: SyncResult | null;
+  onFinalApproval: () => void;
 }
 
 function ReviewPhase({
@@ -757,6 +770,7 @@ function ReviewPhase({
   onDraftChange, onRegenerate,
   isSaving, isSubmitting, saveError,
   onSaveAsDraft, onSubmitForApproval,
+  isSyncing, syncSuccess, syncError, syncResult, onFinalApproval,
 }: ReviewPhaseProps) {
   const wordCount = draftBody.trim() ? draftBody.trim().split(/\s+/).length : 0;
 
@@ -833,7 +847,7 @@ function ReviewPhase({
             </button>
             <button
               onClick={onSubmitForApproval}
-              disabled={isSaving || isSubmitting}
+              disabled={isSaving || isSubmitting || isSyncing}
               className="group flex w-full items-center gap-4 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-blue-50/50 px-5 py-4 text-left transition-all duration-200 hover:from-blue-100 hover:to-blue-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0087DC] shadow-sm shadow-blue-200 transition-transform duration-150 group-hover:scale-105">
@@ -844,6 +858,96 @@ function ReviewPhase({
                 <p className="mt-0.5 text-xs text-blue-500">Send to manager · triggers notification</p>
               </div>
             </button>
+
+            {/* ── Divider ─────────────────────────────────────── */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-100" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-2 text-[10px] font-bold uppercase tracking-widest text-slate-300">
+                  or finalize
+                </span>
+              </div>
+            </div>
+
+            {/* ── Approve and Finalize Broadcast ──────────────── */}
+            {syncSuccess && syncResult ? (
+              /* ─ Success state ─ */
+              <div className="overflow-hidden rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10">
+                <div className="flex items-center gap-3 px-5 py-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#a7d33f] shadow-sm">
+                    <CheckCircle2 className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#3d6b0e]">
+                      Dispatched to Basecamp!
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-[#5a8a14]">
+                      {syncResult.simulated
+                        ? "Simulation — set BASECAMP_ACCESS_TOKEN to go live"
+                        : `Todo #${syncResult.todoId} assigned to Bilyana Mihova`}
+                    </p>
+                  </div>
+                </div>
+                {syncResult.appUrl && !syncResult.simulated && (
+                  <div className="border-t border-[#a7d33f]/30 px-5 py-2.5">
+                    <a
+                      href={syncResult.appUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0087DC] hover:underline"
+                    >
+                      View in Basecamp
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ─ Idle / syncing button ─ */
+              <button
+                onClick={onFinalApproval}
+                disabled={isSaving || isSubmitting || isSyncing}
+                className={cn(
+                  "group flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left",
+                  "transition-all duration-200 active:scale-[0.99]",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                  isSyncing
+                    ? "border border-[#a7d33f]/40 bg-[#a7d33f]/8 cursor-wait"
+                    : "border border-[#a7d33f]/50 bg-gradient-to-r from-[#a7d33f]/10 to-[#a7d33f]/5 hover:from-[#a7d33f]/20 hover:to-[#a7d33f]/10"
+                )}
+                style={isSyncing ? { backgroundColor: "rgba(167,211,63,0.06)" } : undefined}
+              >
+                <div className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-sm",
+                  "transition-transform duration-150",
+                  isSyncing ? "bg-[#a7d33f]/60" : "bg-[#a7d33f] group-hover:scale-105"
+                )}>
+                  {isSyncing
+                    ? <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    : <Megaphone className="h-4 w-4 text-white" />}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[#3d6b0e]">
+                    {isSyncing ? "Pushing to Basecamp Tasks…" : "Approve and Finalize Broadcast"}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#5a8a14]">
+                    {isSyncing
+                      ? "Dispatching to project todolist…"
+                      : "Create Basecamp todo · assign to Bilyana Mihova"}
+                  </p>
+                </div>
+              </button>
+            )}
+
+            {/* Sync error */}
+            {syncError && !syncSuccess && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700" role="alert">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                {syncError}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -863,10 +967,16 @@ export function PressReleaseStudio() {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [agentResult, setAgentResult]   = useState<AgentSubmittedState | null>(null);
 
-  // Kept for the review phase (Gemini fallback path — accessible via ReviewPhase)
-  const [draftBody, setDraftBody]   = useState("");
+  // Review / Gemini path
+  const [draftBody, setDraftBody]     = useState("");
   const [isSimulated, setIsSimulated] = useState(false);
-  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [saveError, setSaveError]     = useState<string | null>(null);
+
+  // Basecamp broadcast sync
+  const [isSyncing, setIsSyncing]     = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+  const [syncError, setSyncError]     = useState<string | null>(null);
+  const [syncResult, setSyncResult]   = useState<SyncResult | null>(null);
   const [saved, setSaved]           = useState<SavedState | null>(null);
 
   const [isTriggering, startTrigger] = useTransition();
@@ -938,6 +1048,52 @@ export function PressReleaseStudio() {
     });
   }
 
+  // ── Basecamp broadcast approval ────────────────────────────────────────
+  async function handleFinalApproval() {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+
+    // Build a rich description: metadata header + full draft body
+    const metaLines = [
+      currentCtx?.region        && `**Region:** ${currentCtx.region}`,
+      currentCtx?.language      && `**Language:** ${currentCtx.language}`,
+      currentCtx?.businessUnit  && `**Business Unit:** ${currentCtx.businessUnit}`,
+      currentCtx?.priority      && `**Priority:** ${currentCtx.priority}`,
+      currentCtx?.deadline      && `**Deadline:** ${currentCtx.deadline}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const description = [metaLines, "", "---", "", draftBody].join("\n");
+
+    try {
+      const res = await fetch("/api/basecamp/todo", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title:       `PR Dispatch Pipeline: ${currentTitle}`,
+          description,
+          dueDate:     currentCtx?.deadline || undefined,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setSyncResult({ todoId: data.todoId, appUrl: data.appUrl, simulated: data.simulated });
+        setSyncSuccess(true);
+      } else {
+        setSyncError(data.error ?? "Basecamp sync failed. Please try again.");
+      }
+    } catch {
+      setSyncError("Network error — could not reach /api/basecamp/todo.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
   function handleStartOver() {
     setPhase("select-type");
     setSelectedType(null);
@@ -949,6 +1105,10 @@ export function PressReleaseStudio() {
     setSaveError(null);
     setSaved(null);
     setAgentResult(null);
+    setIsSyncing(false);
+    setSyncSuccess(false);
+    setSyncError(null);
+    setSyncResult(null);
   }
 
   // ── Agent submitted confirmation ───────────────────────────────────────
@@ -1103,6 +1263,11 @@ export function PressReleaseStudio() {
           saveError={saveError}
           onSaveAsDraft={handleSaveAsDraft}
           onSubmitForApproval={handleSubmitForApproval}
+          isSyncing={isSyncing}
+          syncSuccess={syncSuccess}
+          syncError={syncError}
+          syncResult={syncResult}
+          onFinalApproval={handleFinalApproval}
         />
       )}
     </div>
