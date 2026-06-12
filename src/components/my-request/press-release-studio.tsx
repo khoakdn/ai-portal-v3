@@ -438,10 +438,10 @@ function DetailedForm({
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-8 lg:grid-cols-12 items-start">
 
-        {/* ── Left: Form ─────────────────────────────────────── */}
-        <div className="space-y-5">
+        {/* ── Left: Form (7/12) ──────────────────────────────── */}
+        <div className="space-y-5 lg:col-span-7">
 
           {/* ─ Basic Info ─ */}
           <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -697,64 +697,37 @@ function DetailedForm({
           </Button>
         </div>
 
-        {/* ── Right: Agent info panel ──────────────────────────── */}
-        <div className="flex flex-col gap-4">
-          {/* What happens next */}
-          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-6 shadow-sm">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0087DC]/10">
-                <Bot className="h-5 w-5 text-[#0087DC]" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-800">Relevance AI Agent</p>
-                <p className="text-[11px] text-slate-500">Your dedicated press release writer</p>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {[
-                { step: "1", label: "Your brief is formatted into a structured Markdown prompt" },
-                { step: "2", label: "The agent receives all fields: type, region, products, benefits, and more" },
-                { step: "3", label: "The AI agent generates a polished, publication-ready draft" },
-                { step: "4", label: "You can review and track the output in your Relevance AI workspace" },
-              ].map(({ step, label }) => (
-                <div key={step} className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0087DC] text-[10px] font-bold text-white">
-                    {step}
-                  </span>
-                  <p className="text-[13px] leading-snug text-slate-600">{label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* ── Right: Relevance AI chatbox (5/12) ──────────────── */}
+        <div className="sticky top-6 lg:col-span-5">
+          {/* Premium container card */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
-          {/* Fields summary */}
-          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-              Fields sent to agent
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                "Article Title", "Type", "Region", "Language",
-                "Business Unit", "Priority", "Deadline",
-                "Thematic Focus", "Products / Solutions",
-                "Product Description", "Contact Person",
-                "Info Links", "Existing Systems", "Test Reports",
-              ].map((field) => (
-                <span key={field} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                  {field}
+            {/* Header strip */}
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                {/* Live pulse dot */}
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                 </span>
-              ))}
+                <span className="text-[13px] font-semibold text-slate-700">
+                  DeltaPR Interactive Assistant
+                </span>
+              </div>
+              <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0087DC]">
+                Live
+              </span>
             </div>
-          </div>
 
-          {/* Trigger hint */}
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
-            <Zap className="mx-auto mb-2 h-5 w-5 text-slate-300" />
-            <p className="text-[12px] text-slate-400">
-              Fill all required fields and click{" "}
-              <span className="font-semibold text-slate-600">Send to AI Agent</span>{" "}
-              to trigger the Relevance AI workflow.
-            </p>
+            {/* Iframe */}
+            <div className="p-1">
+              <iframe
+                src="https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/7d952fd2-b498-45f4-83e0-97984ef1eab7/embed-chat?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=agent&primary_color=%230087dc&bubble_icon=pd%2Fchat&input_placeholder_text=Type+your+message...&hide_logo=true&hide_description=false"
+                className="min-h-[650px] w-full rounded-xl border-0"
+                allow="microphone"
+                title="DeltaPR Interactive Assistant"
+              />
+            </div>
           </div>
         </div>
       </div>
