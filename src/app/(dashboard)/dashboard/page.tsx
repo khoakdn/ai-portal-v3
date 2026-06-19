@@ -69,7 +69,7 @@ function DeltaNavHero({
   fullDate: string;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+    <div className="pointer-events-auto relative grid grid-cols-1 gap-6 lg:grid-cols-12">
 
       {/* ══ LEFT — Executive Welcome Panel (4 / 12) ══════════════ */}
       <div className="flex flex-col gap-5 lg:col-span-4">
@@ -169,8 +169,8 @@ function DeltaNavHero({
       </div>
 
       {/* ══ RIGHT — Live Agent Panel (8 / 12) ════════════════════ */}
-      <div className="lg:col-span-8">
-        <div className="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
+      <div className="pointer-events-auto relative z-10 lg:col-span-8">
+        <div className="pointer-events-auto relative z-10 flex h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
 
           {/* Management bar */}
           <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5 py-3">
@@ -201,15 +201,15 @@ function DeltaNavHero({
             </div>
           </div>
 
-          {/* Iframe — fills remaining height with zero gutters */}
-          <div className="flex-1 overflow-hidden">
+          {/* Iframe — explicit flex growth so hit targets map correctly */}
+          <div className="pointer-events-auto relative z-10 flex min-h-[500px] flex-1 overflow-hidden">
             <iframe
               src={COPILOT_IFRAME_SRC}
               title="DeltaNav Co-Pilot"
               width="100%"
               height="100%"
               allow="microphone"
-              className="h-full w-full rounded-b-2xl border-0"
+              className="pointer-events-auto relative z-10 h-full min-h-[500px] w-full flex-1 rounded-b-2xl border-0"
             />
           </div>
         </div>

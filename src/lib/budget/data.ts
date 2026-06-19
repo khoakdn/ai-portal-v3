@@ -248,3 +248,63 @@ export function dateToQuarterIndex(dateStr?: string | null): number {
   if (month < 9)  return 2; // Q3
   return 3;                  // Q4
 }
+
+/** Sum of all line annual budgets — default FY ceiling */
+export const DEFAULT_ANNUAL_BUDGET_TOTAL = INITIAL_BUDGET_LINES.reduce(
+  (sum, line) => sum + line.annualBudget,
+  0
+);
+
+/** Deep-clone budget lines (preserves current spend in session) */
+export function cloneBudgetLines(lines: BudgetLine[]): BudgetLine[] {
+  return lines.map((line) => ({
+    ...line,
+    quarterlyBudget: [...line.quarterlyBudget] as [number, number, number, number],
+    quarterlySpent: [...line.quarterlySpent] as [number, number, number, number],
+  }));
+}
+
+/** Scale every budget allocation to a new annual ceiling (spent unchanged) */
+export function scaleBudgetLinesToAnnualTotal(
+  lines: BudgetLine[],
+  newAnnualTotal: number
+): BudgetLine[] {
+  const currentTotal = lines.reduce((sum, line) => sum + line.annualBudget, 0);
+  if (currentTotal <= 0) return lines;
+  const factor = newAnnualTotal / currentTotal;
+  return lines.map((line) => ({
+    ...line,
+    annualBudget: Math.round(line.annualBudget * factor),
+    quarterlyBudget: line.quarterlyBudget.map((q) => Math.round(q * factor)) as [
+      number,
+      number,
+      number,
+      number,
+    ],
+  }));
+}
+
+/** Reset budget allocations to template while keeping session spend */
+export function resetBudgetLinesToDefault(currentLines: BudgetLine[]): BudgetLine[] {
+  const spentById = Object.fromEntries(
+    currentLines.map((line) => [line.id, line.quarterlySpent])
+  );
+  return INITIAL_BUDGET_LINES.map((line) => ({
+    ...line,
+    quarterlyBudget: [...line.quarterlyBudget] as [number, number, number, number],
+    quarterlySpent: spentById[line.id]
+      ? ([...spentById[line.id]] as [number, number, number, number])
+      : ([...line.quarterlySpent] as [number, number, number, number]),
+  }));
+}
+
+/** Scale monthly budgeted curve to match a new annual ceiling */
+export function scaleMonthlyBudgetData(
+  data: MonthlyDataPoint[],
+  factor: number
+): MonthlyDataPoint[] {
+  return data.map((point) => ({
+    ...point,
+    budgeted: Math.round(point.budgeted * factor),
+  }));
+}

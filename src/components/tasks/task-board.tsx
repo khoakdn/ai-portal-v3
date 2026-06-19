@@ -17,6 +17,8 @@ import {
   ArrowRight,
   Eye,
   ExternalLink,
+  Trash2,
+  EyeOff,
 } from "lucide-react";
 import { updateTaskStatus } from "@/actions/tasks/update-task-status";
 import { requestChanges } from "@/actions/tasks/request-changes";
@@ -36,6 +38,8 @@ import {
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import type { TaskStatus } from "@/types/database";
+
+const COMPLETED_STATUSES: TaskStatus[] = ["approved", "rejected"];
 
 const STATUS_FILTER_OPTIONS: { label: string; value: TaskStatus | "all" }[] = [
   { label: "All",              value: "all" },
@@ -109,22 +113,40 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
   const [viewTask, setViewTask]             = useState<TaskDetail | null>(null);
   const [viewLoading, setViewLoading]       = useState(false);
 
+  // Admin: prune completed / remove rows locally
+  const [hideCompleted, setHideCompleted]   = useState(false);
+  const [removedTaskIds, setRemovedTaskIds] = useState<Set<string>>(new Set());
+
   const [optimisticTasks, updateOptimisticTasks] = useOptimistic(
     initialTasks,
     (state, { taskId, status }: { taskId: string; status: TaskStatus }) =>
       state.map((t) => (t.id === taskId ? { ...t, status } : t))
   );
 
-  const filteredTasks =
-    statusFilter === "all"
-      ? optimisticTasks
-      : optimisticTasks.filter((t) => t.status === statusFilter);
+  const visibleTasks = optimisticTasks.filter((t) => !removedTaskIds.has(t.id));
+
+  const filteredTasks = visibleTasks.filter((t) => {
+    if (hideCompleted && COMPLETED_STATUSES.includes(t.status)) return false;
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    return true;
+  });
 
   const counts = Object.fromEntries(
     ["all", "draft", "pending_approval", "needs_revisions", "approved", "rejected"].map(
-      (s) => [s, s === "all" ? initialTasks.length : initialTasks.filter((t) => t.status === s).length]
+      (s) => [
+        s,
+        s === "all"
+          ? visibleTasks.length
+          : visibleTasks.filter((t) => t.status === s).length,
+      ]
     )
   ) as Record<string, number>;
+
+  function handleDeleteTask(taskId: string) {
+    setActionError(null);
+    setRemovedTaskIds((prev) => new Set(prev).add(taskId));
+    if (viewTaskId === taskId) closeViewPanel();
+  }
 
   function handleStatusChange(taskId: string, newStatus: TaskStatus) {
     setActionError(null);
@@ -212,34 +234,52 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
         </div>
       )}
 
-      {/* Status filter tabs */}
-      <div className="flex flex-wrap gap-1.5" role="tablist">
-        {STATUS_FILTER_OPTIONS.map(({ label, value }) => {
-          const count    = counts[value] ?? 0;
-          const isActive = statusFilter === value;
-          return (
-            <button
-              key={value}
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => setStatusFilter(value)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-                isActive
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
-              )}
-            >
-              {label}
-              {count > 0 && (
-                <span className={cn("rounded-full px-1.5 py-0.5 text-xs font-semibold",
-                  isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground")}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* Status filter tabs + hide completed toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5" role="tablist">
+          {STATUS_FILTER_OPTIONS.map(({ label, value }) => {
+            const count    = counts[value] ?? 0;
+            const isActive = statusFilter === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setStatusFilter(value)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground"
+                )}
+              >
+                {label}
+                {count > 0 && (
+                  <span className={cn("rounded-full px-1.5 py-0.5 text-xs font-semibold",
+                    isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground")}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setHideCompleted((v) => !v)}
+          aria-pressed={hideCompleted}
+          className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+            hideCompleted
+              ? "border-[#0087DC] bg-[#0087DC]/10 text-[#0087DC]"
+              : "border-border bg-background text-muted-foreground hover:border-slate-300 hover:text-foreground"
+          )}
+        >
+          {hideCompleted ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          Hide Completed Tasks
+        </button>
       </div>
 
       {/* Tasks table */}
@@ -247,7 +287,11 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 py-16 text-center">
           <CheckCircle2 className="mb-3 h-10 w-10 text-muted-foreground/40" />
           <p className="text-sm font-medium text-muted-foreground">
-            {statusFilter === "all" ? "No tasks yet" : `No ${statusFilter.replace(/_/g, " ")} tasks`}
+            {hideCompleted && statusFilter === "all"
+              ? "No active tasks — completed items are hidden"
+              : statusFilter === "all"
+                ? "No tasks yet"
+                : `No ${statusFilter.replace(/_/g, " ")} tasks`}
           </p>
           {statusFilter === "all" && (
             <Button variant="outline" size="sm" className="mt-4" asChild>
@@ -280,6 +324,7 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
                   onRequestChanges={() => openRcDialog(task)}
                   onSubmit={() => handleStatusChange(task.id, "pending_approval")}
                   onView={() => handleOpenView(task.id)}
+                  onDelete={() => handleDeleteTask(task.id)}
                   isApproving={approvingId === task.id}
                   isSubmitting={submittingId === task.id}
                   approveSuccess={approveSuccessId === task.id}
@@ -464,6 +509,7 @@ function TaskTableRow({
   onRequestChanges,
   onSubmit,
   onView,
+  onDelete,
   isApproving,
   isSubmitting,
   approveSuccess,
@@ -473,6 +519,7 @@ function TaskTableRow({
   onRequestChanges: () => void;
   onSubmit: () => void;
   onView: () => void;
+  onDelete: () => void;
   isApproving: boolean;
   isSubmitting: boolean;
   approveSuccess: boolean;
@@ -536,17 +583,28 @@ function TaskTableRow({
       </td>
 
       <td className="relative z-10 py-3.5 pl-3 pr-4 text-right">
-        <ActionButtons
-          status={task.status}
-          onApprove={onApprove}
-          onRequestChanges={onRequestChanges}
-          onSubmit={onSubmit}
-          onView={onView}
-          taskId={task.id}
-          isApproving={isApproving}
-          isSubmitting={isSubmitting}
-          approveSuccess={approveSuccess}
-        />
+        <div className="flex items-center justify-end gap-1.5">
+          <ActionButtons
+            status={task.status}
+            onApprove={onApprove}
+            onRequestChanges={onRequestChanges}
+            onSubmit={onSubmit}
+            onView={onView}
+            taskId={task.id}
+            isApproving={isApproving}
+            isSubmitting={isSubmitting}
+            approveSuccess={approveSuccess}
+          />
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Remove task from list"
+            aria-label={`Remove ${task.title} from list`}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </td>
     </tr>
   );

@@ -13,6 +13,9 @@ import {
   DollarSign,
   Loader2,
   Paperclip,
+  RotateCcw,
+  Settings2,
+  Trash2,
   TrendingDown,
   TrendingUp,
   Upload,
@@ -23,16 +26,31 @@ import { extractInvoice } from "@/actions/invoices/extract-invoice";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   INITIAL_BUDGET_LINES,
   MONTHLY_DATA,
   CATEGORY_COLORS,
+  DEFAULT_ANNUAL_BUDGET_TOTAL,
   fmt, fmtFull,
   getTimeframeMetrics,
   getLinesForTimeframe,
+  scaleBudgetLinesToAnnualTotal,
+  scaleMonthlyBudgetData,
+  resetBudgetLinesToDefault,
   dateToQuarterIndex,
   type BudgetLine,
+  type MonthlyDataPoint,
   type TimeframeTab,
   type ChartType,
 } from "@/lib/budget/data";
@@ -138,8 +156,8 @@ function ChartSelector({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ChartPanel({
-  chartType, lines, tab,
-}: { chartType: ChartType; lines: BudgetLine[]; tab: TimeframeTab }) {
+  chartType, lines, tab, monthlyData,
+}: { chartType: ChartType; lines: BudgetLine[]; tab: TimeframeTab; monthlyData: MonthlyDataPoint[] }) {
   const timeframeLines = getLinesForTimeframe(lines, tab);
 
   // ── Bar chart data ──
@@ -246,7 +264,7 @@ function ChartPanel({
 
       {chartType === "area" && (
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={MONTHLY_DATA} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+          <AreaChart data={monthlyData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
             <defs>
               <linearGradient id="gradBudgeted" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#0087DC" stopOpacity={0.15} />
@@ -329,59 +347,149 @@ function CategoryTable({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Uploaded invoice history
+// ─────────────────────────────────────────────────────────────────────────────
+
+type UploadStatus = "extracting" | "ready" | "approved" | "error";
+
+interface UploadedInvoiceRecord {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  status: UploadStatus;
+  errorMessage?: string;
+  invoiceData?: InvoiceSchema;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function uploadStatusLabel(status: UploadStatus): string {
+  switch (status) {
+    case "extracting": return "Extracting…";
+    case "ready":      return "Ready for review";
+    case "approved":   return "Approved";
+    case "error":      return "Extraction failed";
+  }
+}
+
+function UploadedInvoicesList({
+  records,
+  activeId,
+  onRemove,
+  onSelect,
+}: {
+  records: UploadedInvoiceRecord[];
+  activeId: string | null;
+  onRemove: (id: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  if (records.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-100">
+      <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Uploaded Invoices ({records.length})
+        </p>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-100 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            <th className="px-4 py-2">File</th>
+            <th className="hidden px-3 py-2 sm:table-cell">Size</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-4 py-2 text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-50">
+          {records.map((record) => (
+            <tr
+              key={record.id}
+              className={cn(
+                "transition-colors",
+                activeId === record.id && "bg-blue-50/50",
+                record.status === "ready" && "cursor-pointer hover:bg-slate-50/80"
+              )}
+              onClick={() => {
+                if (record.status === "ready" && record.invoiceData) onSelect(record.id);
+              }}
+            >
+              <td className="max-w-[160px] truncate px-4 py-2.5 font-medium text-slate-700">
+                {record.fileName}
+              </td>
+              <td className="hidden px-3 py-2.5 text-xs text-slate-500 sm:table-cell">
+                {formatFileSize(record.fileSize)}
+              </td>
+              <td className="px-3 py-2.5">
+                <span className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                  record.status === "extracting" && "bg-blue-50 text-blue-600",
+                  record.status === "ready"      && "bg-amber-50 text-amber-700",
+                  record.status === "approved"   && "bg-emerald-50 text-emerald-700",
+                  record.status === "error"      && "bg-red-50 text-red-600"
+                )}>
+                  {record.status === "extracting" && (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  )}
+                  {uploadStatusLabel(record.status)}
+                </span>
+              </td>
+              <td className="px-4 py-2.5 text-right">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(record.id);
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remove Invoice
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Invoice upload zone
 // ─────────────────────────────────────────────────────────────────────────────
 
-type UploadPhase = "idle" | "loading" | "preview" | "approved" | "error";
-
 function InvoiceUploadZone({
-  onResult,
+  onUploadFile,
 }: {
-  onResult: (data: InvoiceSchema) => void;
+  onUploadFile: (file: File) => void;
 }) {
-  const [phase, setPhase] = useState<UploadPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [, startTransition] = useTransition();
 
-  const process = useCallback((file: File) => {
-    setPhase("loading");
+  const acceptFile = useCallback((file: File) => {
     setError(null);
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.append("file", file);
-      const result = await extractInvoice(fd);
-      if (result.success && result.data) {
-        onResult(result.data);
-        setPhase("preview");
-      } else {
-        setError(result.error ?? "Extraction failed.");
-        setPhase("error");
-      }
-    });
-  }, [onResult]);
+    onUploadFile(file);
+  }, [onUploadFile]);
 
   const handleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) process(file);
-  }, [process]);
+    if (file) acceptFile(file);
+    e.target.value = "";
+  }, [acceptFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) process(file);
-  }, [process]);
-
-  if (phase === "loading") {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-[#0087DC]" />
-        <p className="text-sm font-medium text-slate-600">Extracting data with AI…</p>
-        <p className="text-xs text-slate-400">Gemini is reading your invoice and inferring budget category</p>
-      </div>
-    );
-  }
+    if (file) acceptFile(file);
+  }, [acceptFile]);
 
   return (
     <label
@@ -390,7 +498,7 @@ function InvoiceUploadZone({
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 transition-all duration-200",
+        "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-10 transition-all duration-200",
         dragOver
           ? "border-[#0087DC] bg-blue-50"
           : "border-slate-200 bg-slate-50/50 hover:border-[#0087DC]/50 hover:bg-blue-50/30"
@@ -418,6 +526,81 @@ function InvoiceUploadZone({
         onChange={handleFile}
       />
     </label>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Annual budget configuration dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+function BudgetConfigDialog({
+  open,
+  onOpenChange,
+  currentCeiling,
+  onApply,
+  onReset,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  currentCeiling: number;
+  onApply: (value: number) => void;
+  onReset: () => void;
+}) {
+  const [inputValue, setInputValue] = useState(String(currentCeiling));
+
+  function handleOpenChange(next: boolean) {
+    if (next) setInputValue(String(currentCeiling));
+    onOpenChange(next);
+  }
+
+  function handleApply() {
+    const parsed = Number(inputValue.replace(/[,\s€$]/g, ""));
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    onApply(parsed);
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5 text-[#0087DC]" />
+            Set Annual Budget
+          </DialogTitle>
+          <DialogDescription>
+            Adjust the FY baseline ceiling. All category allocations, utilisation percentages, and charts scale proportionally.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label htmlFor="annual-budget-input" className="text-xs font-semibold text-slate-600">
+            Annual budget ceiling (USD)
+          </Label>
+          <Input
+            id="annual-budget-input"
+            type="number"
+            min={1}
+            step={1000}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="e.g. 500000"
+            className="font-mono text-lg"
+          />
+          <p className="text-[11px] text-slate-400">
+            Default: {fmtFull(DEFAULT_ANNUAL_BUDGET_TOTAL)} · Current: {fmtFull(currentCeiling)}
+          </p>
+        </div>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button type="button" variant="outline" onClick={onReset}>
+            <RotateCcw className="h-4 w-4" />
+            Reset to Default
+          </Button>
+          <Button type="button" onClick={handleApply}>
+            Save Budget
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -601,16 +784,92 @@ function ImpactBanner({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function BudgetCommandCenter() {
-  const [lines, setLines]               = useState<BudgetLine[]>(INITIAL_BUDGET_LINES);
+  const [lines, setLines]               = useState<BudgetLine[]>(() =>
+    INITIAL_BUDGET_LINES.map((line) => ({
+      ...line,
+      quarterlyBudget: [...line.quarterlyBudget] as [number, number, number, number],
+      quarterlySpent: [...line.quarterlySpent] as [number, number, number, number],
+    }))
+  );
+  const [monthlyData, setMonthlyData]     = useState<MonthlyDataPoint[]>(MONTHLY_DATA);
+  const [annualCeiling, setAnnualCeiling] = useState(DEFAULT_ANNUAL_BUDGET_TOTAL);
+  const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
   const [activeTab, setActiveTab]       = useState<TimeframeTab>("Q2");
   const [chartType, setChartType]       = useState<ChartType>("bar");
   const [pendingInvoice, setPendingInvoice] = useState<InvoiceSchema | null>(null);
+  const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
+  const [uploadedInvoices, setUploadedInvoices] = useState<UploadedInvoiceRecord[]>([]);
   const [approvedCount, setApprovedCount] = useState(0);
+  const [, startUploadTransition] = useTransition();
 
   const metrics = getTimeframeMetrics(lines, activeTab);
 
-  function handleInvoiceResult(data: InvoiceSchema) {
-    setPendingInvoice(data);
+  function handleUploadFile(file: File) {
+    const id = crypto.randomUUID();
+    setUploadedInvoices((prev) => [
+      ...prev,
+      { id, fileName: file.name, fileSize: file.size, status: "extracting" },
+    ]);
+
+    startUploadTransition(async () => {
+      const fd = new FormData();
+      fd.append("file", file);
+      const result = await extractInvoice(fd);
+
+      if (result.success && result.data) {
+        setUploadedInvoices((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, status: "ready" as const, invoiceData: result.data }
+              : r
+          )
+        );
+        setPendingInvoice(result.data);
+        setActiveUploadId(id);
+      } else {
+        setUploadedInvoices((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? {
+                  ...r,
+                  status: "error" as const,
+                  errorMessage: result.error ?? "Extraction failed.",
+                }
+              : r
+          )
+        );
+      }
+    });
+  }
+
+  function handleRemoveUpload(id: string) {
+    setUploadedInvoices((prev) => prev.filter((r) => r.id !== id));
+    if (activeUploadId === id) {
+      setActiveUploadId(null);
+      setPendingInvoice(null);
+    }
+  }
+
+  function handleSelectUpload(id: string) {
+    const record = uploadedInvoices.find((r) => r.id === id);
+    if (record?.invoiceData) {
+      setActiveUploadId(id);
+      setPendingInvoice(record.invoiceData);
+    }
+  }
+
+  function handleApplyBudgetCeiling(newCeiling: number) {
+    const factor = newCeiling / annualCeiling;
+    setLines((prev) => scaleBudgetLinesToAnnualTotal(prev, newCeiling));
+    setMonthlyData((prev) => scaleMonthlyBudgetData(prev, factor));
+    setAnnualCeiling(newCeiling);
+  }
+
+  function handleResetBudgetCeiling() {
+    setLines((prev) => resetBudgetLinesToDefault(prev));
+    setMonthlyData(MONTHLY_DATA);
+    setAnnualCeiling(DEFAULT_ANNUAL_BUDGET_TOTAL);
+    setBudgetDialogOpen(false);
   }
 
   function handleApprove() {
@@ -621,7 +880,6 @@ export function BudgetCommandCenter() {
     setLines((prev) =>
       prev.map((line) => {
         if (line.category !== pendingInvoice.inferredCategory) return line;
-        // If sub-category matches (or invoice has none), apply to this line
         if (
           pendingInvoice.inferredSubCategory != null &&
           line.subCategory !== pendingInvoice.inferredSubCategory
@@ -631,8 +889,19 @@ export function BudgetCommandCenter() {
         return { ...line, quarterlySpent: newSpent };
       })
     );
+    if (activeUploadId) {
+      setUploadedInvoices((prev) =>
+        prev.map((r) => (r.id === activeUploadId ? { ...r, status: "approved" as const } : r))
+      );
+    }
     setApprovedCount((c) => c + 1);
     setPendingInvoice(null);
+    setActiveUploadId(null);
+  }
+
+  function handleDiscardPending() {
+    setPendingInvoice(null);
+    setActiveUploadId(null);
   }
 
   const TABS: TimeframeTab[] = ["Q1", "Q2", "Q3", "Q4", "H1", "Full Year"];
@@ -640,7 +909,31 @@ export function BudgetCommandCenter() {
   return (
     <div className="space-y-6">
 
+      <BudgetConfigDialog
+        open={budgetDialogOpen}
+        onOpenChange={setBudgetDialogOpen}
+        currentCeiling={annualCeiling}
+        onApply={handleApplyBudgetCeiling}
+        onReset={handleResetBudgetCeiling}
+      />
+
       {/* ── Hero metrics ──────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
+          FY 2026 · Annual ceiling {fmtFull(annualCeiling)}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setBudgetDialogOpen(true)}
+          className="gap-2"
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          Set / Reset Annual Budget
+        </Button>
+      </div>
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label="Total Budget"
@@ -723,7 +1016,7 @@ export function BudgetCommandCenter() {
             <ChartSelector value={chartType} onChange={setChartType} />
           </div>
           <div className="p-6">
-            <ChartPanel chartType={chartType} lines={lines} tab={activeTab} />
+            <ChartPanel chartType={chartType} lines={lines} tab={activeTab} monthlyData={monthlyData} />
           </div>
         </div>
 
@@ -742,16 +1035,14 @@ export function BudgetCommandCenter() {
               AI reads your invoice and maps it to the correct budget line
             </p>
           </div>
-          <div className="p-6">
-            {pendingInvoice ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 py-8 text-center">
-                <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-                <p className="text-sm font-semibold text-slate-700">Invoice scanned successfully</p>
-                <p className="text-xs text-slate-400">Review the impact panel and approve or discard</p>
-              </div>
-            ) : (
-              <InvoiceUploadZone onResult={handleInvoiceResult} />
-            )}
+          <div className="space-y-4 p-6">
+            <InvoiceUploadZone onUploadFile={handleUploadFile} />
+            <UploadedInvoicesList
+              records={uploadedInvoices}
+              activeId={activeUploadId}
+              onRemove={handleRemoveUpload}
+              onSelect={handleSelectUpload}
+            />
           </div>
         </div>
 
@@ -763,7 +1054,7 @@ export function BudgetCommandCenter() {
               lines={lines}
               tab={activeTab}
               onApprove={handleApprove}
-              onDiscard={() => setPendingInvoice(null)}
+              onDiscard={handleDiscardPending}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 py-16 text-center">

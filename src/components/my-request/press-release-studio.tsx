@@ -698,9 +698,9 @@ function DetailedForm({
         </div>
 
         {/* ── Right: Relevance AI chatbox (5/12) ──────────────── */}
-        <div className="sticky top-6 lg:col-span-5">
+        <div className="pointer-events-auto relative z-10 sticky top-6 lg:col-span-5">
           {/* Premium container card */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="pointer-events-auto relative z-10 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 
             {/* Header strip */}
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
@@ -720,10 +720,10 @@ function DetailedForm({
             </div>
 
             {/* Iframe */}
-            <div className="p-1">
+            <div className="pointer-events-auto relative z-10 flex min-h-[500px] flex-1 p-1">
               <iframe
                 src="https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/7d952fd2-b498-45f4-83e0-97984ef1eab7/embed-chat?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=agent&primary_color=%230087dc&bubble_icon=pd%2Fchat&input_placeholder_text=Type+your+message...&hide_logo=true&hide_description=false"
-                className="min-h-[650px] w-full rounded-xl border-0"
+                className="pointer-events-auto relative z-10 h-full min-h-[500px] w-full flex-1 rounded-xl border-0"
                 allow="microphone"
                 title="DeltaPR Interactive Assistant"
               />
