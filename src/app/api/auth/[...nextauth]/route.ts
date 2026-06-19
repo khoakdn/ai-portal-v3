@@ -1,5 +1,6 @@
 /**
  * NextAuth catch-all route — OTP credentials sign-in via @/lib/auth.
+ * Handler is created at module load; authOptions uses a safe NEXTAUTH_SECRET fallback.
  */
 
 import NextAuth from "next-auth";

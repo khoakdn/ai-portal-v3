@@ -1,12 +1,14 @@
 /**
  * NextAuth configuration — passwordless OTP via Credentials (demo mode).
- * No database adapter; codes live in in-memory store.
+ * Stateless signed proofs work across Vercel serverless instances.
  */
 
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getServerSession } from "next-auth";
+import { verifyOtpProof } from "@/lib/auth/otp-crypto";
 import { verifyAndConsumeOtp } from "@/lib/auth/otp-store";
+import { resolveNextAuthSecret } from "@/lib/auth/secret";
 
 export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV === "development",
@@ -28,31 +30,43 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: "Email", type: "email" },
         code: { label: "Verification Code", type: "text" },
+        otpProof: { label: "OTP Proof", type: "text" },
       },
       async authorize(credentials) {
-        const email = credentials?.email?.trim().toLowerCase() ?? "";
-        const code = credentials?.code?.trim() ?? "";
+        try {
+          const email = credentials?.email?.trim().toLowerCase() ?? "";
+          const code = credentials?.code?.trim() ?? "";
+          const otpProof = credentials?.otpProof?.trim() ?? "";
 
-        if (!email || !code) {
-          console.warn("[Auth] OTP authorize — missing email or code");
+          if (!email || !code) {
+            console.warn("[Auth] OTP authorize — missing email or code");
+            return null;
+          }
+
+          console.log(`[Auth Demo] OTP login attempt: ${email}`);
+
+          const fromMemory = verifyAndConsumeOtp(email, code);
+          const fromProof =
+            !fromMemory && otpProof
+              ? verifyOtpProof(email, code, otpProof)
+              : false;
+
+          const codeValid = fromMemory || fromProof;
+          console.log(
+            `[Auth Demo] OTP verification for ${email}: ${codeValid} (memory=${fromMemory}, proof=${fromProof})`
+          );
+
+          if (!codeValid) return null;
+
+          return {
+            id: email,
+            email,
+            name: email.split("@")[0],
+          };
+        } catch (err) {
+          console.error("[Auth] authorize threw — returning null:", err);
           return null;
         }
-
-        // Demo mode — accept any email domain; verify against in-memory OTP store only.
-        console.log(`[Auth Demo] OTP login attempt: ${email}`);
-
-        const codeValid = verifyAndConsumeOtp(email, code);
-        console.log(`[Auth Demo] OTP code verification for ${email}: ${codeValid}`);
-
-        if (!codeValid) {
-          return null;
-        }
-
-        return {
-          id: email,
-          email,
-          name: email.split("@")[0],
-        };
       },
     }),
   ],
@@ -81,7 +95,7 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: resolveNextAuthSecret(),
 };
 
 /** Server-side session accessor for layouts, pages, and API routes. */

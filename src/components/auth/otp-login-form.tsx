@@ -17,6 +17,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [mockCode, setMockCode] = useState<string | null>(null);
+  const [otpProof, setOtpProof] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(initialError ?? "");
 
@@ -36,6 +37,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
     setLoading(true);
     setErrorMessage("");
     setMockCode(null);
+    setOtpProof("");
 
     try {
       const res = await fetch("/api/auth/send-otp", {
@@ -47,6 +49,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
       const data = (await res.json()) as {
         success?: boolean;
         mockCode?: string;
+        otpProof?: string;
         error?: string;
       };
 
@@ -57,6 +60,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
 
       setEmail(trimmed);
       setStep("code");
+      setOtpProof(data.otpProof ?? "");
 
       if (data.mockCode) {
         setMockCode(data.mockCode);
@@ -92,6 +96,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
       const result = await signIn("credentials", {
         email,
         code: trimmedCode,
+        otpProof,
         callbackUrl: "/dashboard",
         redirect: false,
       });
@@ -122,6 +127,7 @@ export function OtpLoginForm({ initialError }: OtpLoginFormProps) {
     setStep("email");
     setCode("");
     setMockCode(null);
+    setOtpProof("");
     setErrorMessage("");
   }
 

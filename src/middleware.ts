@@ -1,21 +1,61 @@
 /**
- * Protect portal routes — unauthenticated users are redirected to /login.
+ * Protect portal routes — redirects unauthenticated users to /login.
+ * Uses getToken with try/catch so missing secrets never crash the edge runtime.
  */
 
-import { withAuth } from "next-auth/middleware";
+import { getToken } from "next-auth/jwt";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { resolveNextAuthSecret } from "@/lib/auth/secret";
 
-export default withAuth({
-  pages: {
-    signIn: "/login",
-  },
-});
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/press-release",
+  "/invoice-analyzer",
+  "/my-request/press-release",
+  "/invoices",
+  "/tasks",
+  "/content",
+  "/integrations",
+];
+
+function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
+export async function middleware(req: NextRequest) {
+  if (!isProtectedPath(req.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
+  try {
+    const token = await getToken({
+      req,
+      secret: resolveNextAuthSecret(),
+    });
+
+    if (token) {
+      return NextResponse.next();
+    }
+
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname);
+    return NextResponse.redirect(loginUrl);
+  } catch (err) {
+    console.error("[middleware] Auth check failed — redirecting to login:", err);
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+}
 
 export const config = {
   matcher: [
     "/dashboard/:path*",
     "/press-release/:path*",
     "/invoice-analyzer/:path*",
-    // Existing app routes that map to the same environments
     "/my-request/press-release/:path*",
     "/invoices/:path*",
     "/tasks/:path*",
