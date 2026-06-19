@@ -24,6 +24,7 @@ import { requestChanges } from "@/actions/tasks/request-changes";
 import { resubmitTask } from "@/actions/tasks/resubmit-task";
 import { updateTaskStatus } from "@/actions/tasks/update-task-status";
 import { assignTask } from "@/actions/tasks/assign-task";
+import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import type { TaskDetail } from "@/actions/tasks/get-task-detail";
 import type { TaskActivity, TaskStatus } from "@/types/database";
 import { TEAM_MEMBERS, getMemberById, type TeamMember } from "@/lib/team";
@@ -499,9 +500,15 @@ function ActivityTimeline({
 
 function ReviewerActionBar({
   taskId,
+  taskTitle,
+  businessUnit,
+  draftText,
   onOptimisticUpdate,
 }: {
   taskId: string;
+  taskTitle: string;
+  businessUnit: string;
+  draftText: string;
   onOptimisticUpdate: (status: TaskStatus) => void;
 }) {
   const [rcDialogOpen, setRcDialogOpen] = useState(false);
@@ -509,16 +516,41 @@ function ReviewerActionBar({
   const [isPending, startTransition]    = useTransition();
   const [error, setError]               = useState<string | null>(null);
   const [approveSuccess, setApproveSuccess] = useState(false);
+  const [basecampResult, setBasecampResult] = useState<{
+    todoId?: number;
+    appUrl?: string;
+    simulated?: boolean;
+    error?: string;
+  } | null>(null);
 
   function handleApprove() {
     setError(null);
     setApproveSuccess(false);
+    setBasecampResult(null);
     startTransition(async () => {
       onOptimisticUpdate("approved");
       const result = await updateTaskStatus({ taskId, status: "approved" });
       if (!result.success) {
         setError(result.error ?? "Could not approve task.");
+        return;
+      }
+
+      const bc = await createBasecampTodoFromClient({
+        title: taskTitle,
+        businessUnit,
+        draftText,
+        contentPrefix: "Review Press Release Draft:",
+      });
+
+      if (bc.success) {
+        setBasecampResult({
+          todoId: bc.todoId,
+          appUrl: bc.appUrl,
+          simulated: bc.simulated,
+        });
+        setApproveSuccess(true);
       } else {
+        setBasecampResult({ error: bc.error ?? "Basecamp dispatch failed." });
         setApproveSuccess(true);
       }
     });
@@ -541,12 +573,40 @@ function ReviewerActionBar({
 
   if (approveSuccess) {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/15 px-5 py-4">
-        <CheckCircle2 className="h-5 w-5 shrink-0 text-[#a7d33f]" />
-        <div>
-          <p className="text-sm font-semibold text-[#3d6b0e]">Task approved successfully</p>
-          <p className="text-xs text-[#5a8a14]">Status updated and notifications dispatched.</p>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3 rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/15 px-5 py-4">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-[#a7d33f]" />
+          <div>
+            <p className="text-sm font-semibold text-[#3d6b0e]">Task approved successfully</p>
+            <p className="text-xs text-[#5a8a14]">Status updated in the portal workflow.</p>
+          </div>
         </div>
+        {basecampResult?.appUrl && !basecampResult.error && (
+          <div className="rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 px-5 py-4">
+            <p className="text-sm font-semibold text-slate-800">
+              Assigned to Bilyana Mihova on Basecamp
+              {basecampResult.simulated ? " (simulation)" : ""}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Todo #{basecampResult.todoId} · push notification dispatched
+            </p>
+            {!basecampResult.simulated && (
+              <a
+                href={basecampResult.appUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block text-xs font-semibold text-[#0087DC] hover:underline"
+              >
+                View on Basecamp →
+              </a>
+            )}
+          </div>
+        )}
+        {basecampResult?.error && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            Approved locally, but Basecamp sync failed: {basecampResult.error}
+          </p>
+        )}
       </div>
     );
   }
@@ -848,7 +908,13 @@ export function TaskDetailView({ task, activity }: TaskDetailViewProps) {
           {isReviewable && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-3 text-sm font-semibold text-slate-800">Review Decision</h2>
-              <ReviewerActionBar taskId={task.id} onOptimisticUpdate={setOptimisticStatus} />
+              <ReviewerActionBar
+                taskId={task.id}
+                taskTitle={task.title}
+                businessUnit="Marketing Communications"
+                draftText={currentContent}
+                onOptimisticUpdate={setOptimisticStatus}
+              />
             </div>
           )}
 

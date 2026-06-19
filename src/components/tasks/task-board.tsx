@@ -24,6 +24,7 @@ import { updateTaskStatus } from "@/actions/tasks/update-task-status";
 import { requestChanges } from "@/actions/tasks/request-changes";
 import { getTaskDetail, type TaskDetail } from "@/actions/tasks/get-task-detail";
 import type { TaskRow } from "@/actions/tasks/get-tasks";
+import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,6 +108,13 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
   const [approvingId, setApprovingId]       = useState<string | null>(null);
   const [submittingId, setSubmittingId]     = useState<string | null>(null);
   const [approveSuccessId, setApproveSuccessId] = useState<string | null>(null);
+  const [basecampSync, setBasecampSync] = useState<{
+    taskId: string;
+    todoId?: number;
+    appUrl?: string;
+    simulated?: boolean;
+    error?: string;
+  } | null>(null);
 
   // View detail panel
   const [viewTaskId, setViewTaskId]         = useState<string | null>(null);
@@ -153,6 +161,8 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
     if (newStatus === "approved") setApprovingId(taskId);
     if (newStatus === "pending_approval") setSubmittingId(taskId);
 
+    const task = optimisticTasks.find((t) => t.id === taskId);
+
     startTransition(async () => {
       updateOptimisticTasks({ taskId, status: newStatus });
       const result = await updateTaskStatus({ taskId, status: newStatus });
@@ -162,7 +172,58 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
 
       if (result.success && newStatus === "approved") {
         setApproveSuccessId(taskId);
-        window.setTimeout(() => setApproveSuccessId((id) => (id === taskId ? null : id)), 3500);
+
+        let draftText = "Approved via Delta Portal Tasks workspace.";
+        const { task: detail } = await getTaskDetail(taskId);
+        if (detail) {
+          draftText =
+            detail.content_draft?.edited_body ??
+            detail.content_draft?.generated_body ??
+            detail.description ??
+            draftText;
+        }
+
+        const bc = await createBasecampTodoFromClient({
+          title: task?.title ?? detail?.title ?? "Task",
+          businessUnit: "Marketing Communications",
+          draftText,
+          contentPrefix:
+            task?.content_draft_type === "press_release"
+              ? "Review Press Release Draft:"
+              : "Review Task Assignment:",
+        });
+
+        if (bc.success) {
+          setBasecampSync({
+            taskId,
+            todoId: bc.todoId,
+            appUrl: bc.appUrl,
+            simulated: bc.simulated,
+          });
+        } else {
+          setBasecampSync({ taskId, error: bc.error ?? "Basecamp dispatch failed." });
+        }
+
+        window.setTimeout(() => setApproveSuccessId((id) => (id === taskId ? null : id)), 5000);
+      } else if (result.success && newStatus === "pending_approval") {
+        let draftText = "Submitted for approval via Delta Portal.";
+        const { task: detail } = await getTaskDetail(taskId);
+        if (detail) {
+          draftText =
+            detail.content_draft?.edited_body ??
+            detail.content_draft?.generated_body ??
+            detail.description ??
+            draftText;
+        }
+        await createBasecampTodoFromClient({
+          title: task?.title ?? detail?.title ?? "Task",
+          businessUnit: "Marketing Communications",
+          draftText,
+          contentPrefix:
+            task?.content_draft_type === "press_release"
+              ? "Review Press Release Draft:"
+              : "Review Task Assignment:",
+        });
       } else if (!result.success) {
         setActionError(result.error ?? "Action failed. Please try again.");
       }
@@ -231,6 +292,33 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
             <p className="font-medium">Action failed</p>
             <p className="mt-0.5">{actionError}</p>
           </div>
+        </div>
+      )}
+
+      {basecampSync?.appUrl && !basecampSync.error && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10 px-4 py-3 text-sm">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-[#a7d33f]" />
+            <div>
+              <p className="font-semibold text-[#3d6b0e]">
+                Dispatched to Bilyana Mihova&apos;s Basecamp board
+                {basecampSync.simulated ? " (simulation)" : ""}
+              </p>
+              <p className="text-xs text-[#5a8a14]">
+                Todo #{basecampSync.todoId} · push notification sent
+              </p>
+            </div>
+          </div>
+          {!basecampSync.simulated && (
+            <a
+              href={basecampSync.appUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-xs font-semibold text-[#0087DC] hover:underline"
+            >
+              View in Basecamp
+            </a>
+          )}
         </div>
       )}
 

@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
 import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
+import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import { DocumentSkeleton } from "@/components/ui/skeleton-loader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -880,12 +881,12 @@ function ReviewPhase({
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-[#3d6b0e]">
-                      Dispatched to Basecamp!
+                      Assigned to Bilyana Mihova on Basecamp!
                     </p>
                     <p className="mt-0.5 text-[11px] text-[#5a8a14]">
                       {syncResult.simulated
-                        ? "Simulation — set BASECAMP_ACCESS_TOKEN to go live"
-                        : `Todo #${syncResult.todoId} assigned to Bilyana Mihova`}
+                        ? "Simulation — set BASECAMP_REFRESH_TOKEN to go live"
+                        : `Todo #${syncResult.todoId} · push notification sent`}
                     </p>
                   </div>
                 </div>
@@ -1072,6 +1073,12 @@ export function PressReleaseStudio() {
         editedBody: draftBody,
       });
       if (result.success && result.taskId) {
+        await createBasecampTodoFromClient({
+          title: currentTitle,
+          businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
+          draftText: draftBody,
+          contentPrefix: "Review Press Release Draft:",
+        });
         setSaved({ taskId: result.taskId, mode: "pending_approval", simulated: isSimulated });
         setPhase("saved");
       } else {
@@ -1087,40 +1094,26 @@ export function PressReleaseStudio() {
     setSyncError(null);
     setSyncResult(null);
 
-    // Build a rich description: metadata header + full draft body
-    const metaLines = [
-      currentCtx?.region        && `**Region:** ${currentCtx.region}`,
-      currentCtx?.language      && `**Language:** ${currentCtx.language}`,
-      currentCtx?.businessUnit  && `**Business Unit:** ${currentCtx.businessUnit}`,
-      currentCtx?.priority      && `**Priority:** ${currentCtx.priority}`,
-      currentCtx?.deadline      && `**Deadline:** ${currentCtx.deadline}`,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const description = [metaLines, "", "---", "", draftBody].join("\n");
-
     try {
-      const res = await fetch("/api/basecamp/todo", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title:       `PR Dispatch Pipeline: ${currentTitle}`,
-          description,
-          dueDate:     currentCtx?.deadline || undefined,
-        }),
+      const data = await createBasecampTodoFromClient({
+        title: currentTitle,
+        businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
+        draftText: draftBody,
+        contentPrefix: "Review Press Release Draft:",
       });
 
-      const data = await res.json();
-
       if (data.success) {
-        setSyncResult({ todoId: data.todoId, appUrl: data.appUrl, simulated: data.simulated });
+        setSyncResult({
+          todoId: data.todoId,
+          appUrl: data.appUrl,
+          simulated: data.simulated,
+        });
         setSyncSuccess(true);
       } else {
         setSyncError(data.error ?? "Basecamp sync failed. Please try again.");
       }
     } catch {
-      setSyncError("Network error — could not reach /api/basecamp/todo.");
+      setSyncError("Network error — could not reach /api/basecamp/create-todo.");
     } finally {
       setIsSyncing(false);
     }
