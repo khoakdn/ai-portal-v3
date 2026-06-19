@@ -29,7 +29,6 @@ import {
   Zap,
 } from "lucide-react";
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
-import { triggerPressReleaseAgent } from "@/actions/relevance/trigger-press-release-agent";
 import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
 import { DocumentSkeleton } from "@/components/ui/skeleton-loader";
 import { Button } from "@/components/ui/button";
@@ -989,22 +988,55 @@ export function PressReleaseStudio() {
     setPhase("fill-form");
   }
 
-  // ── Primary path: send form to Relevance AI agent ──────────────────────
+  // ── Primary path: call /api/relevance/press-release, then show draft ──
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
     setCurrentTitle(title);
     setCurrentCtx(ctx);
     startTrigger(async () => {
-      const result = await triggerPressReleaseAgent({
-        title,
-        pressReleaseType: ctx.pressReleaseType,
-        context: ctx,
-      });
-      if (result.success) {
-        setAgentResult({ jobId: result.jobId ?? "triggered", simulated: result.simulated });
-        setPhase("agent-submitted");
-      } else {
-        setTriggerError(result.error ?? "Failed to trigger the agent. Please try again.");
+      try {
+        const res = await fetch("/api/relevance/press-release", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            region:             ctx.region,
+            language:           ctx.language,
+            businessUnit:       ctx.businessUnit,
+            priority:           ctx.priority           ?? "",
+            deadline:           ctx.deadline           ?? "",
+            thematicFocus:      ctx.thematicFocus,
+            productsToAddress:  ctx.productsToAddress,
+            infoMaterialLinks:  ctx.infoMaterialLinks  ?? "",
+            contactPerson:      ctx.contactPerson      ?? "",
+            productDescription: ctx.productDescription,
+            existingSystems:    ctx.existingSystems    ?? "",
+            testReports:        ctx.testReports        ?? "",
+          }),
+        });
+
+        const data = await res.json().catch(() => ({ success: false, error: "Invalid response from server." }));
+
+        if (!data.success) {
+          setTriggerError(data.error ?? "The AI agent failed to respond. Please try again.");
+          return;
+        }
+
+        if (data.draft) {
+          // Agent returned the draft immediately — transition to review
+          setDraftBody(data.draft as string);
+          setIsSimulated(data.simulated ?? false);
+          setPhase("review");
+        } else {
+          // Agent was triggered but output is async (job queued) — show confirmation
+          setAgentResult({
+            jobId:     (data.jobId as string) ?? "triggered",
+            simulated: data.simulated ?? false,
+          });
+          setPhase("agent-submitted");
+        }
+      } catch {
+        setTriggerError("Network error — could not reach /api/relevance/press-release. Check your connection.");
       }
     });
   }
