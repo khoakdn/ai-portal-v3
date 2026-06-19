@@ -11,6 +11,10 @@ import {
   ArrowRight,
   TrendingUp,
   MessageSquare,
+  CalendarDays,
+  BarChart3,
+  ChevronRight,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -19,65 +23,198 @@ import type { TaskRow } from "@/actions/tasks/get-tasks";
 import { formatRelativeTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 /* ═══════════════════════════════════════════════════════════════
-   § 1 — DELTANAV ACTIVE AGENT HERO
+   § 1 — DELTANAV BENTO HERO  (two-column grid)
    ═══════════════════════════════════════════════════════════════ */
 
-const AGENT_IFRAME_SRC =
-  "https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/23efc695-a036-4761-8330-ac445e61051b/share?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=icon&primary_color=%230087dc&bubble_icon=sparkle&input_placeholder_text=Type+your+message...&hide_logo=false&hide_description=false";
+const COPILOT_IFRAME_SRC =
+  "https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/7d952fd2-b498-45f4-83e0-97984ef1eab7/embed-chat?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=agent&primary_color=%230087dc&bubble_icon=pd%2Fchat&input_placeholder_text=Type+your+message...&hide_logo=true&hide_description=false";
 
-function DeltaNavHero({ pendingCount }: { pendingCount: number }) {
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+const QUICK_LINKS = [
+  {
+    href:     "/my-request/press-release",
+    label:    "Press Release Studio",
+    caption:  "Create & dispatch announcements",
+    icon:     Newspaper,
+    iconBg:   "bg-violet-50",
+    iconColor:"text-violet-600",
+    border:   "hover:border-violet-200",
+  },
+  {
+    href:     "/invoices",
+    label:    "Invoice Auditor",
+    caption:  "Upload & extract invoice data",
+    icon:     Receipt,
+    iconBg:   "bg-[#0087DC]/8",
+    iconColor:"text-[#0087DC]",
+    border:   "hover:border-[#0087DC]/30",
+  },
+  {
+    href:     "/invoices",
+    label:    "Budget Dashboard",
+    caption:  "Track spend vs. budget",
+    icon:     BarChart3,
+    iconBg:   "bg-[#a7d33f]/10",
+    iconColor:"text-[#4a7010]",
+    border:   "hover:border-[#a7d33f]/50",
+  },
+] as const;
 
+function DeltaNavHero({
+  pendingCount,
+  weekday,
+  fullDate,
+}: {
+  pendingCount: number;
+  weekday: string;
+  fullDate: string;
+}) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
 
-      {/* ── Header strip ── */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5">
+      {/* ══ LEFT — Executive Welcome Panel (4 / 12) ══════════════ */}
+      <div className="flex flex-col gap-5 lg:col-span-4">
 
-        {/* Left: pulse + title + date */}
-        <div className="flex items-center gap-3">
-          {/* Delta Tertiary Green live pulse */}
-          <span className="relative flex h-2.5 w-2.5 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a7d33f] opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#a7d33f]" />
-          </span>
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-slate-800">DeltaNav Active Agent</span>
-            <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#0087DC]">
-              Live
-            </span>
+        {/* Welcome + calendar card */}
+        <div className="flex flex-col gap-5 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+
+          {/* Greeting */}
+          <div>
+            <p className="text-sm font-medium text-slate-400">Welcome back,</p>
+            <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-slate-900">
+              Delta Marketing Team
+            </h1>
           </div>
-          <span className="hidden text-[11px] text-slate-400 sm:block">{today}</span>
-        </div>
 
-        {/* Right: pending badge */}
-        {pendingCount > 0 && (
+          {/* Calendar widget */}
+          <div className="flex items-center gap-3.5 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0087DC]/10">
+              <CalendarDays className="h-5 w-5 text-[#0087DC]" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Today</p>
+              <p className="text-sm font-semibold text-slate-700">{weekday}</p>
+              <p className="text-[11px] text-slate-400">{fullDate}</p>
+            </div>
+          </div>
+
+          {/* Pending workflow alert */}
           <Link
             href="/tasks"
-            className="flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+            className={cn(
+              "group flex items-center gap-3.5 rounded-xl border px-4 py-3 transition-all duration-200",
+              pendingCount > 0
+                ? "border-amber-200 bg-amber-50 hover:bg-amber-100"
+                : "border-slate-100 bg-slate-50 hover:bg-slate-100"
+            )}
           >
-            <Clock3 className="h-3 w-3" aria-hidden="true" />
-            {pendingCount} pending
+            <div className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+              pendingCount > 0 ? "bg-amber-100" : "bg-slate-100"
+            )}>
+              <Clock3 className={cn("h-5 w-5", pendingCount > 0 ? "text-amber-600" : "text-slate-400")} aria-hidden="true" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={cn(
+                "text-sm font-bold",
+                pendingCount > 0 ? "text-amber-800" : "text-slate-500"
+              )}>
+                {pendingCount > 0 ? `${pendingCount} Tasks Pending Review` : "No pending tasks"}
+              </p>
+              <p className={cn("text-[11px]", pendingCount > 0 ? "text-amber-600" : "text-slate-400")}>
+                {pendingCount > 0 ? "Tap to review workflow queue →" : "You're all caught up!"}
+              </p>
+            </div>
+            {pendingCount > 0 && (
+              <span className="flex h-6 min-w-[24px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white">
+                {pendingCount}
+              </span>
+            )}
           </Link>
-        )}
+        </div>
+
+        {/* Quick-access shortcuts */}
+        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+          <p className="mb-3.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            <Zap className="h-3 w-3" aria-hidden="true" />
+            Quick Access
+          </p>
+          <div className="space-y-2">
+            {QUICK_LINKS.map(({ href, label, caption, icon: Icon, iconBg, iconColor, border }) => (
+              <Link
+                key={href + label}
+                href={href}
+                className={cn(
+                  "group flex items-center gap-3.5 rounded-xl border border-slate-100 bg-slate-50/50 px-4 py-3",
+                  "transition-all duration-200 hover:bg-white hover:shadow-sm",
+                  border
+                )}
+              >
+                <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", iconBg)}>
+                  <Icon className={cn("h-4 w-4", iconColor)} aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-700 group-hover:text-slate-900">
+                    {label}
+                  </p>
+                  <p className="text-[11px] text-slate-400">{caption}</p>
+                </div>
+                <ChevronRight
+                  className="h-4 w-4 shrink-0 text-slate-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-slate-400"
+                  aria-hidden="true"
+                />
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* ── Iframe body ── */}
-      <div className="h-[500px] w-full">
-        <iframe
-          src={AGENT_IFRAME_SRC}
-          title="DeltaNav Active Agent"
-          width="100%"
-          height="100%"
-          allow="microphone"
-          className="rounded-b-2xl border-0"
-        />
+      {/* ══ RIGHT — Live Agent Panel (8 / 12) ════════════════════ */}
+      <div className="lg:col-span-8">
+        <div className="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
+
+          {/* Management bar */}
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5 py-3">
+            <div className="flex items-center gap-2.5">
+              {/* Delta Tertiary Green live pulse */}
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a7d33f] opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#a7d33f]" />
+              </span>
+              <span className="text-[13px] font-semibold text-slate-800">DeltaNav Co&#8209;Pilot</span>
+              <span className="text-[12px] text-slate-300" aria-hidden="true">•</span>
+              <span className="text-[12px] text-slate-500">Online</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {pendingCount > 0 && (
+                <Link
+                  href="/tasks"
+                  className="hidden items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-semibold text-amber-700 transition-colors hover:bg-amber-100 sm:flex"
+                >
+                  <Clock3 className="h-3 w-3" aria-hidden="true" />
+                  {pendingCount} pending
+                </Link>
+              )}
+              <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#0087DC]">
+                Live
+              </span>
+            </div>
+          </div>
+
+          {/* Iframe — fills remaining height with zero gutters */}
+          <div className="flex-1 overflow-hidden">
+            <iframe
+              src={COPILOT_IFRAME_SRC}
+              title="DeltaNav Co-Pilot"
+              width="100%"
+              height="100%"
+              allow="microphone"
+              className="h-full w-full rounded-b-2xl border-0"
+            />
+          </div>
+        </div>
       </div>
+
     </div>
   );
 }
@@ -483,8 +620,14 @@ function RecentActivityFeed({ tasks }: { tasks: TaskRow[] }) {
 function DashboardSkeleton() {
   return (
     <div className="space-y-10 animate-pulse">
-      {/* Hero agent */}
-      <div className="h-[548px] rounded-2xl bg-slate-100" />
+      {/* Bento hero (two-col) */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="space-y-5 lg:col-span-4">
+          <div className="h-52 rounded-2xl bg-slate-100" />
+          <div className="h-44 rounded-2xl bg-slate-100" />
+        </div>
+        <div className="h-[600px] rounded-2xl bg-slate-100 lg:col-span-8" />
+      </div>
 
       {/* Stat cards */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
@@ -526,10 +669,14 @@ async function DashboardContent() {
     (t) => t.status === "approved" && t.updated_at >= weekAgo
   ).length;
 
+  const now     = new Date();
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const fullDate = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
   return (
     <div className="space-y-10">
-      {/* 1 — DeltaNav hero agent */}
-      <DeltaNavHero pendingCount={pendingCount} />
+      {/* 1 — DeltaNav bento hero */}
+      <DeltaNavHero pendingCount={pendingCount} weekday={weekday} fullDate={fullDate} />
 
       {/* 2 — Metric cards */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
