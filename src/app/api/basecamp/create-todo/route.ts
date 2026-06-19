@@ -11,6 +11,7 @@ import {
   buildTodosUrl,
   createBasecampTodo,
   getBasecampEnv,
+  missingBasecampProjectEnv,
   resolveBasecampAccessToken,
   simulatedTodoResponse,
 } from "@/lib/integrations/basecamp-api";
@@ -55,25 +56,28 @@ export async function POST(req: Request) {
 
   const env = getBasecampEnv();
 
-  if (!env.accountId || !env.projectId || !env.listId) {
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "Basecamp project env vars missing. Set BASECAMP_ACCOUNT_ID, BASECAMP_PROJECT_ID, BASECAMP_TODOLIST_ID.",
-      } satisfies CreateTodoApiResponse,
-      { status: 500 }
-    );
-  }
-
   const accessToken = await resolveBasecampAccessToken(env);
 
+  // Simulation mode — no live credentials; project env not required
   if (!accessToken) {
     console.info(
       "[/api/basecamp/create-todo] No refresh token or access token — simulation mode."
     );
     await new Promise((r) => setTimeout(r, 700));
     return NextResponse.json(simulatedTodoResponse(), { status: 201 });
+  }
+
+  const missingProject = missingBasecampProjectEnv(env);
+  if (missingProject.length > 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          `Basecamp project env vars missing: ${missingProject.join(", ")}. ` +
+          "Add them to .env.local and restart the dev server.",
+      } satisfies CreateTodoApiResponse,
+      { status: 500 }
+    );
   }
 
   const assigneeId = parseInt(env.assigneeId ?? "", 10);
@@ -97,9 +101,9 @@ export async function POST(req: Request) {
 
   try {
     const url = buildTodosUrl({
-      accountId: env.accountId,
-      projectId: env.projectId,
-      listId: env.listId,
+      accountId: env.accountId!,
+      projectId: env.projectId!,
+      listId: env.listId!,
     });
 
     const data = await createBasecampTodo(accessToken, url, payload);

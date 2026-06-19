@@ -5,6 +5,20 @@
 const TOKEN_URL = "https://launchpad.37signals.com/authorization/token";
 const USER_AGENT = "DeltaPRPortal (comms@delta.corp)";
 
+/** Read env var — trim whitespace and strip optional surrounding quotes. */
+function readEnv(key: string): string {
+  const raw = process.env[key];
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 export interface BasecampEnvConfig {
   accountId: string;
   projectId: string;
@@ -18,18 +32,26 @@ export interface BasecampEnvConfig {
 
 export function getBasecampEnv(): Partial<BasecampEnvConfig> {
   return {
-    accountId: process.env.BASECAMP_ACCOUNT_ID?.trim() ?? "",
-    projectId: process.env.BASECAMP_PROJECT_ID?.trim() ?? "",
-    listId: process.env.BASECAMP_TODOLIST_ID?.trim() ?? "",
+    accountId: readEnv("BASECAMP_ACCOUNT_ID"),
+    projectId: readEnv("BASECAMP_PROJECT_ID"),
+    listId: readEnv("BASECAMP_TODOLIST_ID"),
     assigneeId:
-      process.env.BASECAMP_BILYANA_ID?.trim() ??
-      process.env.BASECAMP_ASSIGNEE_ID?.trim() ??
-      "",
-    clientId: process.env.BASECAMP_CLIENT_ID?.trim() ?? "",
-    clientSecret: process.env.BASECAMP_CLIENT_SECRET?.trim() ?? "",
-    refreshToken: process.env.BASECAMP_REFRESH_TOKEN?.trim() ?? "",
-    accessTokenFallback: process.env.BASECAMP_ACCESS_TOKEN?.trim() ?? "",
+      readEnv("BASECAMP_BILYANA_ID") ||
+      readEnv("BASECAMP_ASSIGNEE_ID"),
+    clientId: readEnv("BASECAMP_CLIENT_ID"),
+    clientSecret: readEnv("BASECAMP_CLIENT_SECRET"),
+    refreshToken: readEnv("BASECAMP_REFRESH_TOKEN"),
+    accessTokenFallback: readEnv("BASECAMP_ACCESS_TOKEN"),
   };
+}
+
+/** Returns names of required project-scoping env vars that are unset. */
+export function missingBasecampProjectEnv(env: Partial<BasecampEnvConfig>): string[] {
+  const missing: string[] = [];
+  if (!env.accountId) missing.push("BASECAMP_ACCOUNT_ID");
+  if (!env.projectId) missing.push("BASECAMP_PROJECT_ID");
+  if (!env.listId) missing.push("BASECAMP_TODOLIST_ID");
+  return missing;
 }
 
 /** Exchange refresh token for a short-lived access token. */
