@@ -7,32 +7,24 @@ const RELEVANCE_ENDPOINT =
   "https://api-d7b62b.stack.tryrelevance.com/latest/agents/trigger";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Build the human-readable message injected into the agent
+// Build message.content per Relevance AI root-level schema
 // ─────────────────────────────────────────────────────────────────────────────
-function buildAgentMessage(body: Record<string, string>): string {
-  const lines = ["Generate a professional press release based on this data:"];
+function buildMessageContent(formData: Record<string, string>): string {
+  const products =
+    formData.deltaProducts ??
+    formData.productsToAddress ??
+    "";
 
-  if (body.title)              lines.push(`Title: ${body.title}`);
-  if (body.region)             lines.push(`Region: ${body.region}`);
-  if (body.language)           lines.push(`Language: ${body.language}`);
-  if (body.businessUnit)       lines.push(`Business Unit: ${body.businessUnit}`);
-  if (body.priority)           lines.push(`Priority: ${body.priority}`);
-  if (body.deadline)           lines.push(`Deadline: ${body.deadline}`);
-  if (body.thematicFocus)      lines.push(`Content Brief: ${body.thematicFocus}`);
-  if (body.productsToAddress)  lines.push(`Products / Solutions: ${body.productsToAddress}`);
-  if (body.productDescription) lines.push(`Product Specs: ${body.productDescription}`);
-  if (body.contactPerson)      lines.push(`Contact Person: ${body.contactPerson}`);
-  if (body.infoMaterialLinks)  lines.push(`Info & Image Links: ${body.infoMaterialLinks}`);
-  if (body.existingSystems)    lines.push(`Existing Systems: ${body.existingSystems}`);
-  if (body.testReports)        lines.push(`Test Reports: ${body.testReports}`);
-
-  lines.push(
-    "",
-    "Please output only the finished press release in plain wire-service format.",
-    "Do not include meta-commentary, preamble, or markdown fencing.",
-  );
-
-  return lines.join("\n");
+  return [
+    "Please generate a professional press release with the following criteria:",
+    `- Title: ${formData.title ?? ""}`,
+    `- Region: ${formData.region ?? ""}`,
+    `- Language: ${formData.language ?? ""}`,
+    `- Business Unit: ${formData.businessUnit ?? ""}`,
+    `- Thematic Focus: ${formData.thematicFocus ?? ""}`,
+    `- Products: ${products}`,
+    `- Description: ${formData.productDescription ?? ""}`,
+  ].join("\n");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +48,12 @@ function extractDraftText(data: Record<string, unknown>): string | null {
   if (typeof data.answer   === "string" && data.answer.trim())   return data.answer.trim();
   if (typeof data.response === "string" && data.response.trim()) return data.response.trim();
   if (typeof data.text     === "string" && data.text.trim())     return data.text.trim();
+
+  // Message object at top level
+  const msg = data.message as Record<string, unknown> | undefined;
+  if (msg && typeof msg.content === "string" && msg.content.trim()) {
+    return msg.content.trim();
+  }
 
   // Message history array — take the last assistant message
   const msgs = (data.messages ?? data.message_history) as unknown[] | undefined;
@@ -130,14 +128,12 @@ export async function POST(req: Request) {
       });
     }
 
-    // ── Build Relevance AI payload ────────────────────────────────────────────
-    const message = buildAgentMessage(body);
-
+    // ── Build Relevance AI payload (message at root level) ───────────────────
     const payload = {
       agent_id: agentId,
-      inputs: {
-        message,
-        form_data: body,
+      message: {
+        role: "user",
+        content: buildMessageContent(body),
       },
     };
 
@@ -146,7 +142,7 @@ export async function POST(req: Request) {
       method:  "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": apiKey,
+        Authorization: apiKey,
       },
       body: JSON.stringify(payload),
     });

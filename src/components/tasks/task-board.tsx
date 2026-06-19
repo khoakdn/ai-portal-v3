@@ -15,9 +15,12 @@ import {
   ChevronDown,
   MessageSquareDiff,
   ArrowRight,
+  Eye,
+  ExternalLink,
 } from "lucide-react";
 import { updateTaskStatus } from "@/actions/tasks/update-task-status";
 import { requestChanges } from "@/actions/tasks/request-changes";
+import { getTaskDetail, type TaskDetail } from "@/actions/tasks/get-task-detail";
 import type { TaskRow } from "@/actions/tasks/get-tasks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +97,17 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
   const [feedback, setFeedback]           = useState("");
   const [isFeedbackPending, startFeedbackTransition] = useTransition();
   const [actionError, setActionError]     = useState<string | null>(null);
-  const [, startTransition]               = useTransition();
+  const [isPending, startTransition]      = useTransition();
+
+  // Per-row action states
+  const [approvingId, setApprovingId]       = useState<string | null>(null);
+  const [submittingId, setSubmittingId]     = useState<string | null>(null);
+  const [approveSuccessId, setApproveSuccessId] = useState<string | null>(null);
+
+  // View detail panel
+  const [viewTaskId, setViewTaskId]         = useState<string | null>(null);
+  const [viewTask, setViewTask]             = useState<TaskDetail | null>(null);
+  const [viewLoading, setViewLoading]       = useState(false);
 
   const [optimisticTasks, updateOptimisticTasks] = useOptimistic(
     initialTasks,
@@ -113,18 +126,57 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
     )
   ) as Record<string, number>;
 
-  function handleStatusChange(taskId: string, newStatus: TaskStatus, extra?: { rejectionReason?: string }) {
+  function handleStatusChange(taskId: string, newStatus: TaskStatus) {
     setActionError(null);
+    if (newStatus === "approved") setApprovingId(taskId);
+    if (newStatus === "pending_approval") setSubmittingId(taskId);
+
     startTransition(async () => {
       updateOptimisticTasks({ taskId, status: newStatus });
-      const result = await updateTaskStatus({ taskId, status: newStatus, rejectionReason: extra?.rejectionReason });
-      if (!result.success) setActionError(result.error ?? "Action failed. Please try again.");
+      const result = await updateTaskStatus({ taskId, status: newStatus });
+
+      setApprovingId(null);
+      setSubmittingId(null);
+
+      if (result.success && newStatus === "approved") {
+        setApproveSuccessId(taskId);
+        window.setTimeout(() => setApproveSuccessId((id) => (id === taskId ? null : id)), 3500);
+      } else if (!result.success) {
+        setActionError(result.error ?? "Action failed. Please try again.");
+      }
     });
   }
 
   function openRcDialog(task: TaskRow) {
     setFeedback("");
     setRcDialog({ taskId: task.id, taskTitle: task.title });
+  }
+
+  async function handleOpenView(taskId: string) {
+    setViewTaskId(taskId);
+    setViewTask(null);
+    setViewLoading(true);
+    setActionError(null);
+    try {
+      const { task, error } = await getTaskDetail(taskId);
+      if (error || !task) {
+        setActionError(error ?? "Could not load task details.");
+        setViewTaskId(null);
+      } else {
+        setViewTask(task);
+      }
+    } catch {
+      setActionError("Network error — could not load task details.");
+      setViewTaskId(null);
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  function closeViewPanel() {
+    setViewTaskId(null);
+    setViewTask(null);
+    setViewLoading(false);
   }
 
   function confirmRequestChanges() {
@@ -227,6 +279,10 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
                   onApprove={() => handleStatusChange(task.id, "approved")}
                   onRequestChanges={() => openRcDialog(task)}
                   onSubmit={() => handleStatusChange(task.id, "pending_approval")}
+                  onView={() => handleOpenView(task.id)}
+                  isApproving={approvingId === task.id}
+                  isSubmitting={submittingId === task.id}
+                  approveSuccess={approveSuccessId === task.id}
                 />
               ))}
             </tbody>
@@ -235,8 +291,8 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
       )}
 
       {/* Request Changes Dialog */}
-      <Dialog open={!!rcDialog} onOpenChange={(open) => !open && setRcDialog(null)}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={!!rcDialog} onOpenChange={(open) => { if (!open) setRcDialog(null); }}>
+        <DialogContent className="sm:max-w-lg z-[60]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageSquareDiff className="h-5 w-5 text-orange-500" />
@@ -271,6 +327,133 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Task detail slide-over panel */}
+      <TaskViewPanel
+        open={!!viewTaskId}
+        loading={viewLoading}
+        task={viewTask}
+        onClose={closeViewPanel}
+      />
+    </>
+  );
+}
+
+function taskContentPreview(task: TaskDetail): string {
+  if (task.content_draft) {
+    return (
+      task.content_draft.edited_body ??
+      task.content_draft.generated_body ??
+      task.content_draft.bullet_points ??
+      ""
+    );
+  }
+  return task.description ?? "No content available for this task.";
+}
+
+function TaskViewPanel({
+  open,
+  loading,
+  task,
+  onClose,
+}: {
+  open: boolean;
+  loading: boolean;
+  task: TaskDetail | null;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  const preview = task ? taskContentPreview(task) : "";
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-[55] bg-black/40 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Slide-over panel */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Task detail preview"
+        className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl animate-in slide-in-from-right duration-300"
+      >
+        {/* Header */}
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-6 py-5">
+          <div className="min-w-0 pr-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Asset Preview
+            </p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-slate-900">
+              {task?.title ?? "Loading…"}
+            </h2>
+            {task && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <StatusBadge status={task.status} />
+                <span>v{task.version}</span>
+                {task.content_draft && (
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-600">
+                    {task.content_draft.type === "press_release" ? "Press Release" : "Social Post"}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close preview"
+          >
+            <XCircle className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-[#0087DC]" />
+              <p className="text-sm text-slate-500">Loading asset details…</p>
+            </div>
+          ) : task ? (
+            <div className="space-y-4">
+              {task.latest_feedback && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800">
+                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-orange-600">
+                    Revision Feedback
+                  </p>
+                  {task.latest_feedback}
+                </div>
+              )}
+              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Document Content
+                </p>
+                <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700">
+                  {preview || "No document body on file."}
+                </pre>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        {task && (
+          <div className="shrink-0 border-t border-slate-100 px-6 py-4">
+            <Button asChild className="w-full">
+              <Link href={`/tasks/${task.id}`}>
+                Open Full Task
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -280,11 +463,19 @@ function TaskTableRow({
   onApprove,
   onRequestChanges,
   onSubmit,
+  onView,
+  isApproving,
+  isSubmitting,
+  approveSuccess,
 }: {
   task: TaskRow;
   onApprove: () => void;
   onRequestChanges: () => void;
   onSubmit: () => void;
+  onView: () => void;
+  isApproving: boolean;
+  isSubmitting: boolean;
+  approveSuccess: boolean;
 }) {
   const [showFeedback, setShowFeedback] = useState(false);
 
@@ -344,13 +535,17 @@ function TaskTableRow({
         <span className="text-xs text-muted-foreground">{formatRelativeTime(task.updated_at)}</span>
       </td>
 
-      <td className="py-3.5 pl-3 pr-4 text-right">
+      <td className="relative z-10 py-3.5 pl-3 pr-4 text-right">
         <ActionButtons
           status={task.status}
           onApprove={onApprove}
           onRequestChanges={onRequestChanges}
           onSubmit={onSubmit}
+          onView={onView}
           taskId={task.id}
+          isApproving={isApproving}
+          isSubmitting={isSubmitting}
+          approveSuccess={approveSuccess}
         />
       </td>
     </tr>
@@ -362,49 +557,93 @@ function ActionButtons({
   onApprove,
   onRequestChanges,
   onSubmit,
+  onView,
   taskId,
+  isApproving,
+  isSubmitting,
+  approveSuccess,
 }: {
   status: TaskStatus;
   onApprove: () => void;
   onRequestChanges: () => void;
   onSubmit: () => void;
+  onView: () => void;
   taskId: string;
+  isApproving: boolean;
+  isSubmitting: boolean;
+  approveSuccess: boolean;
 }) {
-  const [isPending, startTransition] = useTransition();
+  const busy = isApproving || isSubmitting;
 
-  function wrap(fn: () => void) {
-    return () => startTransition(() => { fn(); });
+  if (approveSuccess) {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-lg border border-[#a7d33f]/50 bg-[#a7d33f]/15 px-3 py-1.5 text-xs font-semibold text-[#3d6b0e]">
+        <CheckCircle2 className="h-3.5 w-3.5 text-[#a7d33f]" />
+        Approved
+      </div>
+    );
   }
 
   if (status === "draft") {
     return (
-      <Button size="sm" variant="outline" onClick={wrap(onSubmit)} disabled={isPending} className="text-xs">
-        {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <SendHorizonal className="h-3 w-3" />}
-        Submit
-      </Button>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onView}
+          className="text-xs"
+        >
+          <Eye className="h-3 w-3" />
+          View
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onSubmit}
+          disabled={busy}
+          className="text-xs"
+        >
+          {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <SendHorizonal className="h-3 w-3" />}
+          Submit
+        </Button>
+      </div>
     );
   }
 
   if (status === "pending_approval") {
     return (
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onView}
+          className="text-xs text-slate-600"
+        >
+          <Eye className="h-3 w-3" />
+          View
+        </Button>
+        <Button
+          type="button"
           size="sm"
           variant="outline"
-          onClick={wrap(onRequestChanges)}
-          disabled={isPending}
+          onClick={onRequestChanges}
+          disabled={busy}
           className="border-orange-200 text-orange-600 hover:bg-orange-50 text-xs"
         >
-          {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquareDiff className="h-3 w-3" />}
+          <MessageSquareDiff className="h-3 w-3" />
           Request Changes
         </Button>
         <Button
+          type="button"
           size="sm"
-          onClick={wrap(onApprove)}
-          disabled={isPending}
-          className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs"
+          onClick={onApprove}
+          disabled={busy}
+          className="bg-[#a7d33f] text-[#1a3d00] hover:bg-[#96be38] text-xs font-semibold"
         >
-          {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+          {isApproving ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
           Approve
         </Button>
       </div>
@@ -413,21 +652,39 @@ function ActionButtons({
 
   if (status === "needs_revisions") {
     return (
-      <Button size="sm" variant="outline" asChild className="text-xs">
+      <div className="flex items-center justify-end gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onView} className="text-xs">
+          <Eye className="h-3 w-3" />
+          View
+        </Button>
+        <Button size="sm" variant="outline" asChild className="text-xs">
+          <Link href={`/tasks/${taskId}`}>
+            <ArrowRight className="h-3 w-3" />
+            Open
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onView}
+        className="text-xs"
+      >
+        <Eye className="h-3 w-3" />
+        View
+      </Button>
+      <Button size="sm" variant="ghost" asChild className="text-xs text-muted-foreground">
         <Link href={`/tasks/${taskId}`}>
           <ArrowRight className="h-3 w-3" />
           Open
         </Link>
       </Button>
-    );
-  }
-
-  return (
-    <Button size="sm" variant="ghost" asChild className="text-xs text-muted-foreground">
-      <Link href={`/tasks/${taskId}`}>
-        <ArrowRight className="h-3 w-3" />
-        View
-      </Link>
-    </Button>
+    </div>
   );
 }

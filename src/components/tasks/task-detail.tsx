@@ -508,13 +508,19 @@ function ReviewerActionBar({
   const [feedback, setFeedback]         = useState("");
   const [isPending, startTransition]    = useTransition();
   const [error, setError]               = useState<string | null>(null);
+  const [approveSuccess, setApproveSuccess] = useState(false);
 
   function handleApprove() {
     setError(null);
+    setApproveSuccess(false);
     startTransition(async () => {
       onOptimisticUpdate("approved");
       const result = await updateTaskStatus({ taskId, status: "approved" });
-      if (!result.success) setError(result.error ?? "Could not approve task.");
+      if (!result.success) {
+        setError(result.error ?? "Could not approve task.");
+      } else {
+        setApproveSuccess(true);
+      }
     });
   }
 
@@ -533,13 +539,26 @@ function ReviewerActionBar({
     });
   }
 
+  if (approveSuccess) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/15 px-5 py-4">
+        <CheckCircle2 className="h-5 w-5 shrink-0 text-[#a7d33f]" />
+        <div>
+          <p className="text-sm font-semibold text-[#3d6b0e]">Task approved successfully</p>
+          <p className="text-xs text-[#5a8a14]">Status updated and notifications dispatched.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {error && (
         <p className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</p>
       )}
-      <div className="flex items-center gap-3">
+      <div className="relative z-10 flex items-center gap-3">
         <Button
+          type="button"
           variant="outline"
           onClick={() => setRcDialogOpen(true)}
           disabled={isPending}
@@ -549,17 +568,18 @@ function ReviewerActionBar({
           Request Changes
         </Button>
         <Button
+          type="button"
           onClick={handleApprove}
           disabled={isPending}
-          className="bg-emerald-600 text-white hover:bg-emerald-700"
+          className="bg-[#a7d33f] font-semibold text-[#1a3d00] hover:bg-[#96be38]"
         >
           {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
           Approve
         </Button>
       </div>
 
-      <Dialog open={rcDialogOpen} onOpenChange={(open) => !open && setRcDialogOpen(false)}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={rcDialogOpen} onOpenChange={setRcDialogOpen}>
+        <DialogContent className="sm:max-w-lg z-[60]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageSquareDiff className="h-5 w-5 text-orange-500" />
@@ -582,6 +602,7 @@ function ReviewerActionBar({
               Cancel
             </Button>
             <Button
+              type="button"
               onClick={handleRequestChanges}
               disabled={isPending || !feedback.trim()}
               className="bg-orange-500 text-white hover:bg-orange-600"
@@ -754,7 +775,10 @@ interface TaskDetailViewProps {
 }
 
 export function TaskDetailView({ task, activity }: TaskDetailViewProps) {
-  const [optimisticStatus, setOptimisticStatus] = useOptimistic<TaskStatus>(task.status);
+  const [optimisticStatus, setOptimisticStatus] = useOptimistic(
+    task.status,
+    (_current, newStatus: TaskStatus) => newStatus
+  );
 
   const currentContent =
     task.content_draft?.edited_body ??

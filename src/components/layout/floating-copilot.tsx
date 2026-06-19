@@ -11,8 +11,8 @@ export function FloatingCopilot() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    /* Anchor — fixed viewport position, sits above all content */
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+    /* Anchor — fixed viewport position; pointer-events-none lets clicks pass through */
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end pointer-events-none">
 
       {/* ── Chat panel ────────────────────────────────────────── */}
       <div
@@ -80,7 +80,7 @@ export function FloatingCopilot() {
         aria-label={isOpen ? "Close DeltaNav Copilot" : "Open DeltaNav Copilot"}
         aria-expanded={isOpen}
         className={cn(
-          "flex h-14 w-14 items-center justify-center rounded-full shadow-xl",
+          "flex h-14 w-14 items-center justify-center rounded-full shadow-xl pointer-events-auto",
           "bg-[#0087DC] text-white",
           "transition-all duration-200 hover:bg-[#0076c0] hover:scale-105 active:scale-95",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#02d5ce] focus-visible:ring-offset-2"
