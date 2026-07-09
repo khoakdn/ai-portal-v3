@@ -20,6 +20,7 @@ export function ContentLifecyclePanel() {
   const [businessUnit, setBusinessUnit] = useState("Marketing Communications");
   const [draftText, setDraftText] = useState("");
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateDebugPayload, setGenerateDebugPayload] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignSuccess, setAssignSuccess] = useState(false);
   const [basecampUrl, setBasecampUrl] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export function ContentLifecyclePanel() {
 
   function handleGenerate() {
     setGenerateError(null);
+    setGenerateDebugPayload(null);
     setAssignError(null);
     setAssignSuccess(false);
     setBasecampUrl(null);
@@ -64,13 +66,19 @@ export function ContentLifecyclePanel() {
         const data = (await res.json().catch(() => ({
           success: false,
           error: "Invalid response from server.",
-        }))) as { success?: boolean; draftText?: string; error?: string };
+        }))) as {
+          success?: boolean;
+          draftText?: string;
+          error?: string;
+          debugPayload?: string;
+        };
 
         if (!res.ok || !data.success || !data.draftText) {
           setGenerateError(
             data.error ??
               `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
           );
+          setGenerateDebugPayload(data.debugPayload ?? null);
           return;
         }
 
@@ -198,7 +206,14 @@ export function ContentLifecyclePanel() {
               role="alert"
             >
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {generateError}
+              <div className="min-w-0 flex-1">
+                <p>{generateError}</p>
+                {generateDebugPayload && (
+                  <pre className="mt-3 max-h-56 overflow-auto rounded-lg border border-red-200 bg-red-100/40 p-3 text-[10px] font-mono leading-relaxed text-red-900 whitespace-pre-wrap break-all">
+                    {generateDebugPayload}
+                  </pre>
+                )}
+              </div>
             </div>
           )}
         </div>

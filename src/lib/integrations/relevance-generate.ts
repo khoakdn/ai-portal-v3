@@ -72,33 +72,88 @@ export function buildRelevanceMessageContent(formData: Record<string, string>): 
   return `${cleanInstructions}\n\n${OUTPUT_GUARDRAILS}`;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return null;
+}
+
 export function extractDraftText(data: Record<string, unknown>): string | null {
-  if (typeof data.output === "string" && data.output.trim()) return data.output.trim();
+  const output = data.output;
+  const outputObj = asRecord(output);
 
-  const out = data.output as Record<string, unknown> | undefined;
-  if (out) {
-    if (typeof out.output === "string" && out.output.trim()) return out.output.trim();
-    if (typeof out.answer === "string" && out.answer.trim()) return out.answer.trim();
-    if (typeof out.text === "string" && out.text.trim()) return out.text.trim();
+  const draftText =
+    asNonEmptyString(outputObj?.output) ||
+    asNonEmptyString(outputObj?.reply) ||
+    asNonEmptyString(data.reply) ||
+    asNonEmptyString(data.response) ||
+    (typeof output === "string" ? asNonEmptyString(output) : null);
+
+  if (draftText) return draftText;
+
+  if (outputObj) {
+    const nested =
+      asNonEmptyString(outputObj.answer) ||
+      asNonEmptyString(outputObj.text) ||
+      asNonEmptyString(outputObj.content) ||
+      asNonEmptyString(outputObj.message) ||
+      asNonEmptyString(outputObj.draft) ||
+      asNonEmptyString(outputObj.result);
+    if (nested) return nested;
   }
 
-  if (typeof data.answer === "string" && data.answer.trim()) return data.answer.trim();
-  if (typeof data.response === "string" && data.response.trim()) return data.response.trim();
-  if (typeof data.text === "string" && data.text.trim()) return data.text.trim();
+  if (asNonEmptyString(data.answer)) return asNonEmptyString(data.answer);
+  if (asNonEmptyString(data.text)) return asNonEmptyString(data.text);
 
-  const msg = data.message as Record<string, unknown> | undefined;
-  if (msg && typeof msg.content === "string" && msg.content.trim()) {
-    return msg.content.trim();
-  }
+  const msg = asRecord(data.message);
+  if (asNonEmptyString(msg?.content)) return asNonEmptyString(msg?.content);
 
   const msgs = (data.messages ?? data.message_history) as unknown[] | undefined;
   if (Array.isArray(msgs) && msgs.length > 0) {
-    const last = msgs[msgs.length - 1] as Record<string, unknown>;
-    const content = last?.content ?? last?.text;
-    if (typeof content === "string" && content.trim()) return content.trim();
+    const last = asRecord(msgs[msgs.length - 1]);
+    const content = last?.content ?? last?.text ?? last?.reply;
+    if (asNonEmptyString(content)) return asNonEmptyString(content);
   }
 
   return null;
+}
+
+export class RelevancePathMappingError extends Error {
+  readonly debugPayload: string;
+
+  constructor(data: Record<string, unknown>) {
+    super("Agent completed but path mapping failed.");
+    this.name = "RelevancePathMappingError";
+    this.debugPayload = JSON.stringify(data);
+  }
+}
+
+export function formatRelevanceApiError(err: unknown): {
+  status: number;
+  body: { success: false; error: string; debugPayload?: string };
+} {
+  if (err instanceof RelevancePathMappingError) {
+    return {
+      status: 500,
+      body: {
+        success: false,
+        error: err.message,
+        debugPayload: err.debugPayload,
+      },
+    };
+  }
+
+  const message = err instanceof Error ? err.message : "Unknown error";
+  return {
+    status: 500,
+    body: { success: false, error: `Live AI call failed: ${message}` },
+  };
 }
 
 export interface RelevanceGenerateResult {
@@ -157,9 +212,11 @@ export async function callRelevanceAgent(
     throw new Error(message);
   }
 
+  console.log("=== RAW RELEVANCE AI RESPONSE ===", JSON.stringify(data, null, 2));
+
   const draftText = extractDraftText(data);
   if (!draftText) {
-    throw new Error("Agent completed but returned no draft text.");
+    throw new RelevancePathMappingError(data);
   }
 
   const jobId: string =

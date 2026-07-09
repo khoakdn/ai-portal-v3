@@ -358,6 +358,7 @@ interface DetailedFormProps {
   onAgentTrigger: (title: string, ctx: PressReleaseStructuredContext) => void;
   isTriggering: boolean;
   triggerError: string | null;
+  triggerDebugPayload: string | null;
 }
 
 function DetailedForm({
@@ -366,6 +367,7 @@ function DetailedForm({
   onAgentTrigger,
   isTriggering,
   triggerError,
+  triggerDebugPayload,
 }: DetailedFormProps) {
   const {
     register,
@@ -680,7 +682,14 @@ function DetailedForm({
           {triggerError && (
             <div className="flex items-start gap-2.5 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700" role="alert">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {triggerError}
+              <div className="min-w-0 flex-1">
+                <p>{triggerError}</p>
+                {triggerDebugPayload && (
+                  <pre className="mt-3 max-h-56 overflow-auto rounded-lg border border-red-200 bg-red-100/40 p-3 text-[10px] font-mono leading-relaxed text-red-900 whitespace-pre-wrap break-all">
+                    {triggerDebugPayload}
+                  </pre>
+                )}
+              </div>
             </div>
           )}
 
@@ -938,6 +947,7 @@ export function PressReleaseStudio() {
   const [currentTitle, setCurrentTitle] = useState("");
   const [currentCtx, setCurrentCtx]     = useState<PressReleaseStructuredContext | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [triggerDebugPayload, setTriggerDebugPayload] = useState<string | null>(null);
 
   const [draftText, setDraftText]       = useState("");
   const [saveError, setSaveError]     = useState<string | null>(null);
@@ -956,6 +966,7 @@ export function PressReleaseStudio() {
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
     setTriggerError(null);
+    setTriggerDebugPayload(null);
     setDraftText("");
     setPhase("fill-form");
   }
@@ -963,6 +974,7 @@ export function PressReleaseStudio() {
   // ── Primary path: call /api/generate, then show draft inline ──
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
+    setTriggerDebugPayload(null);
     setDraftText("");
     setCurrentTitle(title);
     setCurrentCtx(ctx);
@@ -996,13 +1008,19 @@ export function PressReleaseStudio() {
         const data = (await res.json().catch(() => ({
           success: false,
           error: "Invalid response from server.",
-        }))) as { success?: boolean; draftText?: string; error?: string };
+        }))) as {
+          success?: boolean;
+          draftText?: string;
+          error?: string;
+          debugPayload?: string;
+        };
 
         if (!res.ok || !data.success || !data.draftText) {
           setTriggerError(
             data.error ??
               `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
           );
+          setTriggerDebugPayload(data.debugPayload ?? null);
           return;
         }
 
@@ -1145,12 +1163,14 @@ export function PressReleaseStudio() {
           selectedType={selectedType}
           onBack={() => {
             setTriggerError(null);
+            setTriggerDebugPayload(null);
             setDraftText("");
             setPhase("select-type");
           }}
           onAgentTrigger={handleAgentTrigger}
           isTriggering={isTriggering}
           triggerError={triggerError}
+          triggerDebugPayload={triggerDebugPayload}
         />
       )}
 
