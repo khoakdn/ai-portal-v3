@@ -10,7 +10,6 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Bot,
   Calendar,
   CheckCircle2,
   ChevronRight,
@@ -25,6 +24,7 @@ import {
   Sparkles,
   Star,
   Trophy,
+  UserCheck,
   Users,
   Zap,
 } from "lucide-react";
@@ -129,15 +129,11 @@ const PRIORITIES = ["High", "Medium", "Low"];
 // Step tracker
 // ─────────────────────────────────────────────────────────────────────────────
 
-type WizardPhase = "select-type" | "fill-form" | "review" | "saved" | "agent-submitted";
+type WizardPhase = "select-type" | "fill-form" | "review" | "saved";
 
 interface SavedState {
   taskId: string;
   mode: "draft" | "pending_approval";
-}
-
-interface AgentSubmittedState {
-  jobId: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -746,7 +742,7 @@ interface SyncResult {
 
 interface ReviewPhaseProps {
   title: string;
-  draftBody: string;
+  draftText: string;
   onDraftChange: (v: string) => void;
   onRegenerate: () => void;
   isSaving: boolean;
@@ -763,13 +759,13 @@ interface ReviewPhaseProps {
 }
 
 function ReviewPhase({
-  title, draftBody,
+  title, draftText,
   onDraftChange, onRegenerate,
   isSaving, isSubmitting, saveError,
   onSaveAsDraft, onSubmitForApproval,
   isSyncing, syncSuccess, syncError, syncResult, onFinalApproval,
 }: ReviewPhaseProps) {
-  const wordCount = draftBody.trim() ? draftBody.trim().split(/\s+/).length : 0;
+  const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
 
   return (
     <div className="space-y-5">
@@ -791,7 +787,7 @@ function ReviewPhase({
         </button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-6">
         {/* Preview */}
         <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-7 py-4">
@@ -804,7 +800,7 @@ function ReviewPhase({
           <div className="p-5">
             <PressReleasePreview
               title={title}
-              body={draftBody}
+              body={draftText}
               onChange={onDraftChange}
               isEditable={true}
               isGenerating={false}
@@ -812,10 +808,85 @@ function ReviewPhase({
           </div>
         </div>
 
-        {/* Actions */}
+        {/* Forward for verification — directly under draft */}
+        <div className="rounded-2xl border border-[#a7d33f]/40 bg-gradient-to-br from-[#a7d33f]/8 to-white p-6 shadow-sm">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#5a8a14]">
+            Forward Draft for Verification
+          </p>
+          <p className="mt-1.5 text-sm text-slate-600">
+            Push this live draft to Bilyana&apos;s Basecamp review queue. Edit the draft above before assigning.
+          </p>
+
+          {syncSuccess && syncResult ? (
+            <div className="mt-4 overflow-hidden rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10">
+              <div className="flex items-center gap-3 px-5 py-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#a7d33f] shadow-sm">
+                  <CheckCircle2 className="h-5 w-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#3d6b0e]">
+                    Assigned to Bilyana Mihova on Basecamp!
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-[#5a8a14]">
+                    {syncResult.simulated
+                      ? "Simulation — set BASECAMP_REFRESH_TOKEN to go live"
+                      : `Todo #${syncResult.todoId} · push notification sent`}
+                  </p>
+                </div>
+              </div>
+              {syncResult.appUrl && !syncResult.simulated && (
+                <div className="border-t border-[#a7d33f]/30 px-5 py-2.5">
+                  <a
+                    href={syncResult.appUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0087DC] hover:underline"
+                  >
+                    View in Basecamp
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  </a>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={onFinalApproval}
+              disabled={isSaving || isSubmitting || isSyncing}
+              className={cn(
+                "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-[#2d4a0a] shadow-sm",
+                "transition-all duration-200 active:scale-[0.99]",
+                "disabled:cursor-not-allowed disabled:opacity-60",
+                isSyncing
+                  ? "bg-[#a7d33f]/60 cursor-wait"
+                  : "bg-[#a7d33f] hover:bg-[#96bc38]"
+              )}
+            >
+              {isSyncing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Assigning to Basecamp…
+                </>
+              ) : (
+                <>
+                  <UserCheck className="h-4 w-4" />
+                  Assign to Bilyana for Review
+                </>
+              )}
+            </button>
+          )}
+
+          {syncError && !syncSuccess && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700" role="alert">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {syncError}
+            </div>
+          )}
+        </div>
+
+        {/* Secondary portal actions */}
         <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-slate-400">
-            What would you like to do?
+            Or save inside the portal
           </p>
           {saveError && (
             <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3.5 text-xs text-red-700" role="alert">
@@ -823,123 +894,33 @@ function ReviewPhase({
               {saveError}
             </div>
           )}
-          <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <button
               onClick={onSaveAsDraft}
               disabled={isSaving || isSubmitting}
-              className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+              className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 transition-colors group-hover:bg-slate-200">
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : <Save className="h-4 w-4 text-slate-500" />}
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-800">Save as Draft</p>
-                <p className="mt-0.5 text-xs text-slate-400">Keep editing later — not sent for review</p>
+                <p className="mt-0.5 text-xs text-slate-400">Keep editing later in Tasks</p>
               </div>
             </button>
             <button
               onClick={onSubmitForApproval}
               disabled={isSaving || isSubmitting || isSyncing}
-              className="group flex w-full items-center gap-4 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-blue-50/50 px-5 py-4 text-left transition-all duration-200 hover:from-blue-100 hover:to-blue-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+              className="group flex items-center gap-4 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-blue-50/50 px-5 py-4 text-left transition-all duration-200 hover:from-blue-100 hover:to-blue-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0087DC] shadow-sm shadow-blue-200 transition-transform duration-150 group-hover:scale-105">
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <SendHorizonal className="h-4 w-4 text-white" />}
               </div>
               <div>
                 <p className="text-sm font-semibold text-blue-800">Submit for Approval</p>
-                <p className="mt-0.5 text-xs text-blue-500">Send to manager · triggers notification</p>
+                <p className="mt-0.5 text-xs text-blue-500">Internal workflow queue</p>
               </div>
             </button>
-
-            {/* ── Divider ─────────────────────────────────────── */}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-100" />
-              </div>
-              <div className="relative flex justify-center">
-                <span className="bg-white px-2 text-[10px] font-bold uppercase tracking-widest text-slate-300">
-                  or finalize
-                </span>
-              </div>
-            </div>
-
-            {/* ── Approve and Finalize Broadcast ──────────────── */}
-            {syncSuccess && syncResult ? (
-              /* ─ Success state ─ */
-              <div className="overflow-hidden rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10">
-                <div className="flex items-center gap-3 px-5 py-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#a7d33f] shadow-sm">
-                    <CheckCircle2 className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#3d6b0e]">
-                      Assigned to Bilyana Mihova on Basecamp!
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-[#5a8a14]">
-                      {syncResult.simulated
-                        ? "Simulation — set BASECAMP_REFRESH_TOKEN to go live"
-                        : `Todo #${syncResult.todoId} · push notification sent`}
-                    </p>
-                  </div>
-                </div>
-                {syncResult.appUrl && !syncResult.simulated && (
-                  <div className="border-t border-[#a7d33f]/30 px-5 py-2.5">
-                    <a
-                      href={syncResult.appUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0087DC] hover:underline"
-                    >
-                      View in Basecamp
-                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                    </a>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* ─ Idle / syncing button ─ */
-              <button
-                onClick={onFinalApproval}
-                disabled={isSaving || isSubmitting || isSyncing}
-                className={cn(
-                  "group flex w-full items-center gap-4 rounded-xl px-5 py-4 text-left",
-                  "transition-all duration-200 active:scale-[0.99]",
-                  "disabled:cursor-not-allowed disabled:opacity-60",
-                  isSyncing
-                    ? "border border-[#a7d33f]/40 bg-[#a7d33f]/8 cursor-wait"
-                    : "border border-[#a7d33f]/50 bg-gradient-to-r from-[#a7d33f]/10 to-[#a7d33f]/5 hover:from-[#a7d33f]/20 hover:to-[#a7d33f]/10"
-                )}
-                style={isSyncing ? { backgroundColor: "rgba(167,211,63,0.06)" } : undefined}
-              >
-                <div className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-sm",
-                  "transition-transform duration-150",
-                  isSyncing ? "bg-[#a7d33f]/60" : "bg-[#a7d33f] group-hover:scale-105"
-                )}>
-                  {isSyncing
-                    ? <Loader2 className="h-4 w-4 animate-spin text-white" />
-                    : <Megaphone className="h-4 w-4 text-white" />}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-[#3d6b0e]">
-                    {isSyncing ? "Pushing to Basecamp Tasks…" : "Approve and Finalize Broadcast"}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-[#5a8a14]">
-                    {isSyncing
-                      ? "Dispatching to project todolist…"
-                      : "Create Basecamp todo · assign to Bilyana Mihova"}
-                  </p>
-                </div>
-              </button>
-            )}
-
-            {/* Sync error */}
-            {syncError && !syncSuccess && (
-              <div className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700" role="alert">
-                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                {syncError}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -957,10 +938,8 @@ export function PressReleaseStudio() {
   const [currentTitle, setCurrentTitle] = useState("");
   const [currentCtx, setCurrentCtx]     = useState<PressReleaseStructuredContext | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
-  const [agentResult, setAgentResult]   = useState<AgentSubmittedState | null>(null);
 
-  // Review / Gemini path
-  const [draftBody, setDraftBody]     = useState("");
+  const [draftText, setDraftText]       = useState("");
   const [saveError, setSaveError]     = useState<string | null>(null);
 
   // Basecamp broadcast sync
@@ -977,21 +956,19 @@ export function PressReleaseStudio() {
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
     setTriggerError(null);
-    setAgentResult(null);
-    setDraftBody("");
+    setDraftText("");
     setPhase("fill-form");
   }
 
-  // ── Primary path: call /api/relevance/press-release, then show draft ──
+  // ── Primary path: call /api/generate, then show draft inline ──
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
-    setAgentResult(null);
-    setDraftBody("");
+    setDraftText("");
     setCurrentTitle(title);
     setCurrentCtx(ctx);
     startTrigger(async () => {
       try {
-        const res = await fetch("/api/relevance/press-release", {
+        const res = await fetch("/api/generate", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1019,9 +996,9 @@ export function PressReleaseStudio() {
         const data = (await res.json().catch(() => ({
           success: false,
           error: "Invalid response from server.",
-        }))) as { success?: boolean; draft?: string; jobId?: string; error?: string };
+        }))) as { success?: boolean; draftText?: string; error?: string };
 
-        if (!res.ok || !data.success) {
+        if (!res.ok || !data.success || !data.draftText) {
           setTriggerError(
             data.error ??
               `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
@@ -1029,15 +1006,8 @@ export function PressReleaseStudio() {
           return;
         }
 
-        if (data.draft) {
-          setDraftBody(data.draft);
-          setPhase("review");
-        } else {
-          setAgentResult({
-            jobId: data.jobId ?? "triggered",
-          });
-          setPhase("agent-submitted");
-        }
+        setDraftText(data.draftText);
+        setPhase("review");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Network error";
         setTriggerError(`Live AI call failed: ${message}`);
@@ -1053,8 +1023,8 @@ export function PressReleaseStudio() {
         title: currentTitle,
         bulletPoints: currentCtx?.thematicFocus ?? "",
         contentType: "press_release",
-        generatedBody: draftBody,
-        editedBody: draftBody,
+        generatedBody: draftText,
+        editedBody: draftText,
       });
       if (result.success && result.taskId) {
         setSaved({ taskId: result.taskId, mode: "draft" });
@@ -1072,14 +1042,14 @@ export function PressReleaseStudio() {
         title: currentTitle,
         bulletPoints: currentCtx?.thematicFocus ?? "",
         contentType: "press_release",
-        generatedBody: draftBody,
-        editedBody: draftBody,
+        generatedBody: draftText,
+        editedBody: draftText,
       });
       if (result.success && result.taskId) {
         await createBasecampTodoFromClient({
           title: currentTitle,
           businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
-          draftText: draftBody,
+          draftText,
           contentPrefix: "Review Press Release Draft:",
         });
         setSaved({ taskId: result.taskId, mode: "pending_approval" });
@@ -1101,7 +1071,7 @@ export function PressReleaseStudio() {
       const data = await createBasecampTodoFromClient({
         title: currentTitle,
         businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
-        draftText: draftBody,
+        draftText,
         contentPrefix: "Review Press Release Draft:",
       });
 
@@ -1127,102 +1097,14 @@ export function PressReleaseStudio() {
     setSelectedType(null);
     setCurrentTitle("");
     setCurrentCtx(null);
-    setDraftBody("");
+    setDraftText("");
     setTriggerError(null);
     setSaveError(null);
     setSaved(null);
-    setAgentResult(null);
     setIsSyncing(false);
     setSyncSuccess(false);
     setSyncError(null);
     setSyncResult(null);
-  }
-
-  // ── Agent submitted confirmation ───────────────────────────────────────
-  if (phase === "agent-submitted" && agentResult) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-full max-w-md animate-fade-in">
-          {/* Success icon */}
-          <div className="mb-6 flex flex-col items-center text-center">
-            <div className="relative mb-5">
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#0087DC]/10 ring-8 ring-[#0087DC]/5">
-                <Bot className="h-10 w-10 text-[#0087DC]" />
-              </div>
-              <span className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 shadow-md">
-                <CheckCircle2 className="h-4 w-4 text-white" />
-              </span>
-            </div>
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-              Agent Triggered!
-            </h2>
-            <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              Your press release brief has been sent to the Relevance AI agent.
-              The agent is now processing your request.
-            </p>
-          </div>
-
-          {/* Job ID card */}
-          <div className="mb-6 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-              Submission Details
-            </p>
-            <div className="space-y-2.5 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Press Release Type</span>
-                <span className="font-semibold text-slate-800">{selectedType?.label}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Title</span>
-                <span className="max-w-[180px] truncate text-right font-semibold text-slate-800">
-                  {currentTitle}
-                </span>
-              </div>
-              <div className="flex items-center justify-between border-t border-slate-100 pt-2.5">
-                <span className="text-slate-500">Job / Session ID</span>
-                <code className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-mono text-slate-600">
-                  {agentResult.jobId}
-                </code>
-              </div>
-            </div>
-          </div>
-
-          {/* Next steps */}
-          <div className="mb-6 rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-blue-400">
-              What happens next
-            </p>
-            <ul className="space-y-1.5 text-[13px] text-blue-700">
-              <li className="flex items-start gap-2">
-                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                The Relevance AI agent is generating your draft
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Review the output in your Relevance AI workspace
-              </li>
-              <li className="flex items-start gap-2">
-                <SendHorizonal className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Copy the draft back here to submit it for approval
-              </li>
-            </ul>
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-col gap-2.5 sm:flex-row">
-            <Button asChild size="lg" className="flex-1">
-              <Link href="/dashboard">
-                Back to Dashboard
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button variant="outline" size="lg" className="flex-1" onClick={handleStartOver}>
-              Create Another
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   // ── Saved (Gemini path) ────────────────────────────────────────────────
@@ -1263,8 +1145,7 @@ export function PressReleaseStudio() {
           selectedType={selectedType}
           onBack={() => {
             setTriggerError(null);
-            setAgentResult(null);
-            setDraftBody("");
+            setDraftText("");
             setPhase("select-type");
           }}
           onAgentTrigger={handleAgentTrigger}
@@ -1276,8 +1157,8 @@ export function PressReleaseStudio() {
       {phase === "review" && (
         <ReviewPhase
           title={currentTitle}
-          draftBody={draftBody}
-          onDraftChange={setDraftBody}
+          draftText={draftText}
+          onDraftChange={setDraftText}
           onRegenerate={handleStartOver}
           isSaving={isSaving}
           isSubmitting={isSubmitting}

@@ -26,8 +26,7 @@ import { cn } from "@/lib/utils";
    § 1 — DELTANAV BENTO HERO  (two-column grid)
    ═══════════════════════════════════════════════════════════════ */
 
-const COPILOT_IFRAME_SRC =
-  "https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/23efc695-a036-4761-8330-ac445e61051b/embed-chat?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=icon&primary_color=%230087dc&bubble_icon=sparkle&input_placeholder_text=Type+your+message...&hide_logo=false&hide_description=true";
+import { ContentLifecyclePanel } from "@/components/dashboard/content-lifecycle-panel";
 
 const QUICK_LINKS = [
   {
@@ -168,51 +167,9 @@ function DeltaNavHero({
         </div>
       </div>
 
-      {/* ══ RIGHT — Live Agent Panel (8 / 12) ════════════════════ */}
+      {/* ══ RIGHT — Content lifecycle panel (8 / 12) ═══════════════ */}
       <div className="pointer-events-auto relative z-10 lg:col-span-8">
-        <div className="pointer-events-auto relative z-10 flex h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
-
-          {/* Management bar */}
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5 py-3">
-            <div className="flex items-center gap-2.5">
-              {/* Delta Tertiary Green live pulse */}
-              <span className="relative flex h-2.5 w-2.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#a7d33f] opacity-75" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#a7d33f]" />
-              </span>
-              <span className="text-[13px] font-semibold text-slate-800">DeltaNav Co&#8209;Pilot</span>
-              <span className="text-[12px] text-slate-300" aria-hidden="true">•</span>
-              <span className="text-[12px] text-slate-500">Online</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {pendingCount > 0 && (
-                <Link
-                  href="/tasks"
-                  className="hidden items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-semibold text-amber-700 transition-colors hover:bg-amber-100 sm:flex"
-                >
-                  <Clock3 className="h-3 w-3" aria-hidden="true" />
-                  {pendingCount} pending
-                </Link>
-              )}
-              <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#0087DC]">
-                Live
-              </span>
-            </div>
-          </div>
-
-          {/* Iframe — explicit flex growth so hit targets map correctly */}
-          <div className="pointer-events-auto relative z-10 flex min-h-[500px] flex-1 overflow-hidden">
-            <iframe
-              src={COPILOT_IFRAME_SRC}
-              title="DeltaNav Co-Pilot"
-              width="100%"
-              height="100%"
-              allow="microphone"
-              className="pointer-events-auto relative z-10 h-full min-h-[500px] w-full flex-1 rounded-b-2xl border-0"
-            />
-          </div>
-        </div>
+        <ContentLifecyclePanel />
       </div>
 
     </div>
