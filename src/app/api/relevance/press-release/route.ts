@@ -3,6 +3,11 @@ export const fetchCache = "force-no-store";
 
 import { NextResponse } from "next/server";
 
+const RELEVANCE_ENDPOINT =
+  "https://api-d7b62b.stack.tryrelevance.com/latest/agents/trigger";
+
+const AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
+
 /** Strip optional surrounding quotes from env values. */
 function readEnv(key: string): string {
   const raw = process.env[key];
@@ -73,61 +78,26 @@ function extractDraftText(data: Record<string, unknown>): string | null {
   return null;
 }
 
-function buildSimulatedDraft(title: string, businessUnit: string, region: string): string {
-  const today = new Date().toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-
-  return `FOR IMMEDIATE RELEASE
-
-${title}
-
-${region}, ${today} — Delta Electronics, a global leader in power and thermal management solutions, today announced a significant advancement in its ${businessUnit} portfolio.
-
-[SIMULATION MODE — set RELEVANCE_AI_API_KEY in Vercel environment variables to enable live generation]`;
-}
-
 const NO_CACHE_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
   Pragma: "no-cache",
 };
 
-export async function POST(req: Request) {
-  const relevanceEndpoint =
-    "https://api-d7b62b.stack.tryrelevance.com/latest/agents/trigger";
-  const defaultAgentId = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
+function liveErrorResponse(message: string, status = 500) {
+  console.error("[/api/relevance/press-release]", message);
+  return NextResponse.json(
+    { success: false, error: `Live AI call failed: ${message}` },
+    { status, headers: NO_CACHE_HEADERS }
+  );
+}
 
+export async function POST(req: Request) {
   try {
     const body: Record<string, string> = await req.json();
-
-    const apiKey =
-      readEnv("RELEVANCE_AI_API_KEY") || readEnv("RELEVANCE_API_KEY");
-    const agentId =
-      readEnv("RELEVANCE_AI_AGENT_ID") ||
-      readEnv("RELEVANCE_AGENT_ID") ||
-      defaultAgentId;
+    const apiKey = readEnv("RELEVANCE_AI_API_KEY");
 
     if (!apiKey) {
-      console.info(
-        "[/api/relevance/press-release] RELEVANCE_AI_API_KEY not set — simulation mode."
-      );
-      await new Promise((r) => setTimeout(r, 2000));
-
-      return NextResponse.json(
-        {
-          success: true,
-          draft: buildSimulatedDraft(
-            body.title ?? "Press Release",
-            body.businessUnit ?? "Marketing",
-            body.region ?? "EMEA"
-          ),
-          simulated: true,
-          jobId: `sim_${Date.now()}`,
-        },
-        { headers: NO_CACHE_HEADERS }
-      );
+      return liveErrorResponse("RELEVANCE_AI_API_KEY is not configured.");
     }
 
     const payload = {
@@ -135,32 +105,40 @@ export async function POST(req: Request) {
         role: "user" as const,
         content: buildMessageContent(body),
       },
-      agent_id: agentId,
+      agent_id: AGENT_ID,
     };
 
-    const response = await fetch(relevanceEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: apiKey,
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
+    let response: Response;
+    try {
+      response = await fetch(RELEVANCE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: apiKey,
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Network request failed";
+      return liveErrorResponse(message);
+    }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
       console.error("Relevance AI Fault:", errorText);
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Relevance AI returned ${response.status}. ${errorText}`.trim(),
-        },
-        { status: 502, headers: NO_CACHE_HEADERS }
+      return liveErrorResponse(
+        `Relevance AI returned ${response.status}. ${errorText}`.trim()
       );
     }
 
-    const data: Record<string, unknown> = await response.json().catch(() => ({}));
+    let data: Record<string, unknown>;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid JSON from Relevance AI";
+      return liveErrorResponse(message);
+    }
 
     const jobId: string =
       ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
@@ -171,7 +149,7 @@ export async function POST(req: Request) {
     const draft = extractDraftText(data);
 
     console.info(
-      `[/api/relevance/press-release] Agent ${agentId} triggered. Job: ${jobId}. Draft: ${!!draft}. Key present: true`
+      `[/api/relevance/press-release] Agent ${AGENT_ID} triggered. Job: ${jobId}. Draft: ${!!draft}`
     );
 
     return NextResponse.json(
@@ -179,16 +157,11 @@ export async function POST(req: Request) {
         success: true,
         draft,
         jobId,
-        simulated: false,
       },
       { headers: NO_CACHE_HEADERS }
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[/api/relevance/press-release] Unexpected error:", message);
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500, headers: NO_CACHE_HEADERS }
-    );
+    return liveErrorResponse(message);
   }
 }

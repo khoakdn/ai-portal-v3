@@ -134,12 +134,10 @@ type WizardPhase = "select-type" | "fill-form" | "review" | "saved" | "agent-sub
 interface SavedState {
   taskId: string;
   mode: "draft" | "pending_approval";
-  simulated?: boolean;
 }
 
 interface AgentSubmittedState {
   jobId: string;
-  simulated?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -749,7 +747,6 @@ interface SyncResult {
 interface ReviewPhaseProps {
   title: string;
   draftBody: string;
-  isSimulated: boolean;
   onDraftChange: (v: string) => void;
   onRegenerate: () => void;
   isSaving: boolean;
@@ -766,7 +763,7 @@ interface ReviewPhaseProps {
 }
 
 function ReviewPhase({
-  title, draftBody, isSimulated,
+  title, draftBody,
   onDraftChange, onRegenerate,
   isSaving, isSubmitting, saveError,
   onSaveAsDraft, onSubmitForApproval,
@@ -784,11 +781,6 @@ function ReviewPhase({
             Draft Generated
           </span>
           <span className="text-sm text-slate-500">{wordCount} words</span>
-          {isSimulated && (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-600">
-              ⚡ Simulation
-            </span>
-          )}
         </div>
         <button
           onClick={onRegenerate}
@@ -969,7 +961,6 @@ export function PressReleaseStudio() {
 
   // Review / Gemini path
   const [draftBody, setDraftBody]     = useState("");
-  const [isSimulated, setIsSimulated] = useState(false);
   const [saveError, setSaveError]     = useState<string | null>(null);
 
   // Basecamp broadcast sync
@@ -986,7 +977,6 @@ export function PressReleaseStudio() {
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
     setTriggerError(null);
-    setIsSimulated(false);
     setAgentResult(null);
     setDraftBody("");
     setPhase("fill-form");
@@ -995,7 +985,6 @@ export function PressReleaseStudio() {
   // ── Primary path: call /api/relevance/press-release, then show draft ──
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
-    setIsSimulated(false);
     setAgentResult(null);
     setDraftBody("");
     setCurrentTitle(title);
@@ -1027,27 +1016,31 @@ export function PressReleaseStudio() {
           }),
         });
 
-        const data = await res.json().catch(() => ({ success: false, error: "Invalid response from server." }));
+        const data = (await res.json().catch(() => ({
+          success: false,
+          error: "Invalid response from server.",
+        }))) as { success?: boolean; draft?: string; jobId?: string; error?: string };
 
-        if (!data.success) {
-          setTriggerError(data.error ?? "The AI agent failed to respond. Please try again.");
+        if (!res.ok || !data.success) {
+          setTriggerError(
+            data.error ??
+              `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
+          );
           return;
         }
 
         if (data.draft) {
-          setDraftBody(data.draft as string);
-          setIsSimulated(Boolean(data.simulated));
+          setDraftBody(data.draft);
           setPhase("review");
         } else {
           setAgentResult({
-            jobId: (data.jobId as string) ?? "triggered",
-            simulated: Boolean(data.simulated),
+            jobId: data.jobId ?? "triggered",
           });
-          setIsSimulated(Boolean(data.simulated));
           setPhase("agent-submitted");
         }
-      } catch {
-        setTriggerError("Network error — could not reach /api/relevance/press-release. Check your connection.");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Network error";
+        setTriggerError(`Live AI call failed: ${message}`);
       }
     });
   }
@@ -1064,7 +1057,7 @@ export function PressReleaseStudio() {
         editedBody: draftBody,
       });
       if (result.success && result.taskId) {
-        setSaved({ taskId: result.taskId, mode: "draft", simulated: isSimulated });
+        setSaved({ taskId: result.taskId, mode: "draft" });
         setPhase("saved");
       } else {
         setSaveError(result.error ?? "Failed to save.");
@@ -1089,7 +1082,7 @@ export function PressReleaseStudio() {
           draftText: draftBody,
           contentPrefix: "Review Press Release Draft:",
         });
-        setSaved({ taskId: result.taskId, mode: "pending_approval", simulated: isSimulated });
+        setSaved({ taskId: result.taskId, mode: "pending_approval" });
         setPhase("saved");
       } else {
         setSaveError(result.error ?? "Failed to submit.");
@@ -1135,7 +1128,6 @@ export function PressReleaseStudio() {
     setCurrentTitle("");
     setCurrentCtx(null);
     setDraftBody("");
-    setIsSimulated(false);
     setTriggerError(null);
     setSaveError(null);
     setSaved(null);
@@ -1168,11 +1160,6 @@ export function PressReleaseStudio() {
               Your press release brief has been sent to the Relevance AI agent.
               The agent is now processing your request.
             </p>
-            {agentResult.simulated && (
-              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                ⚡ Simulation Mode — add Relevance AI credentials to activate live agent
-              </p>
-            )}
           </div>
 
           {/* Job ID card */}
@@ -1254,11 +1241,6 @@ export function PressReleaseStudio() {
               ? "Your press release draft is saved and ready for editing."
               : "Your press release is in the approval queue. Your manager will be notified."}
           </p>
-          {saved.simulated && (
-            <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-              ⚡ Simulation Mode — add GEMINI_API_KEY for live AI
-            </p>
-          )}
           <div className="mt-8 flex flex-col gap-2.5 sm:flex-row sm:justify-center">
             <Button asChild size="lg">
               <Link href="/tasks">View in Tasks <ArrowRight className="h-4 w-4" /></Link>
@@ -1281,7 +1263,6 @@ export function PressReleaseStudio() {
           selectedType={selectedType}
           onBack={() => {
             setTriggerError(null);
-            setIsSimulated(false);
             setAgentResult(null);
             setDraftBody("");
             setPhase("select-type");
@@ -1296,7 +1277,6 @@ export function PressReleaseStudio() {
         <ReviewPhase
           title={currentTitle}
           draftBody={draftBody}
-          isSimulated={isSimulated}
           onDraftChange={setDraftBody}
           onRegenerate={handleStartOver}
           isSaving={isSaving}
