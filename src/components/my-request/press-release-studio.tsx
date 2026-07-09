@@ -1001,6 +1001,7 @@ export function PressReleaseStudio() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title,
+            pressReleaseType:   ctx.pressReleaseType,
             region:             ctx.region,
             language:           ctx.language,
             businessUnit:       ctx.businessUnit,
