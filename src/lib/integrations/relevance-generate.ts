@@ -3,6 +3,25 @@ export const RELEVANCE_ENDPOINT =
 
 export const RELEVANCE_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
+const POLL_MAX_ATTEMPTS = 10;
+const POLL_INTERVAL_MS = 3000;
+
+const PENDING_TRIGGER_STATES = new Set([
+  "waiting-for-capacity",
+  "starting-up",
+  "queued-for-approval",
+  "queued-for-rerun",
+  "running",
+  "idle",
+]);
+
+const TERMINAL_ERROR_STATES = new Set([
+  "timed-out",
+  "unrecoverable",
+  "errored-pending-approval",
+  "cancelled",
+]);
+
 /** Strip optional surrounding quotes from env values. */
 export function readRelevanceEnv(key: string): string {
   const raw = process.env[key];
@@ -15,6 +34,12 @@ export function readRelevanceEnv(key: string): string {
     return trimmed.slice(1, -1).trim();
   }
   return trimmed;
+}
+
+function getRelevanceBaseUrl(): string {
+  const fromEnv = readRelevanceEnv("RELEVANCE_AI_REGION_BASE_URL");
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  return "https://api-d7b62b.stack.tryrelevance.com/latest";
 }
 
 const OUTPUT_GUARDRAILS =
@@ -84,6 +109,40 @@ function asNonEmptyString(value: unknown): string | null {
   return null;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractTriggerState(data: Record<string, unknown>): string | null {
+  const meta = asRecord(data.metadata);
+  const conversation = asRecord(meta?.conversation);
+  return (
+    asNonEmptyString(data.state) ??
+    asNonEmptyString(conversation?.state) ??
+    asNonEmptyString(meta?.state)
+  );
+}
+
+export function isAsyncPendingResponse(data: Record<string, unknown>): boolean {
+  if (extractDraftText(data)) return false;
+
+  const state = extractTriggerState(data);
+  if (state && PENDING_TRIGGER_STATES.has(state)) return true;
+
+  if (asRecord(data.job_info) && asNonEmptyString(data.conversation_id)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function extractConversationId(data: Record<string, unknown>): string | null {
+  return (
+    asNonEmptyString(data.conversation_id) ??
+    asNonEmptyString(asRecord(data.job_info)?.conversation_id)
+  );
+}
+
 export function extractDraftText(data: Record<string, unknown>): string | null {
   const output = data.output;
   const outputObj = asRecord(output);
@@ -121,7 +180,172 @@ export function extractDraftText(data: Record<string, unknown>): string | null {
     if (asNonEmptyString(content)) return asNonEmptyString(content);
   }
 
+  const viewResults = data.results as unknown[] | undefined;
+  const fromView = extractAgentTextFromViewResults(viewResults);
+  if (fromView) return fromView;
+
   return null;
+}
+
+function extractAgentTextFromViewResults(results: unknown[] | undefined): string | null {
+  if (!Array.isArray(results) || results.length === 0) return null;
+
+  for (let i = results.length - 1; i >= 0; i--) {
+    const item = asRecord(results[i]);
+    const content = asRecord(item?.content);
+    if (!content) continue;
+
+    if (content.type === "agent-message") {
+      if (content.generating === true) continue;
+      const text = asNonEmptyString(content.text);
+      if (text) return text;
+    }
+
+    const nestedText =
+      asNonEmptyString(content.text) ||
+      asNonEmptyString(content.output) ||
+      asNonEmptyString(content.reply);
+    if (nestedText && content.type !== "user-message") {
+      return nestedText;
+    }
+  }
+
+  return null;
+}
+
+async function relevanceFetch(
+  apiKey: string,
+  path: string,
+  init?: RequestInit
+): Promise<Record<string, unknown>> {
+  const baseUrl = getRelevanceBaseUrl();
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: apiKey,
+        ...init?.headers,
+      },
+      cache: "no-store",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Network request failed";
+    throw new Error(`Relevance poll request failed: ${message}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Relevance poll returned ${response.status} for ${path}. ${errorText}`.trim()
+    );
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
+
+async function fetchTaskMetadata(
+  apiKey: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  return relevanceFetch(
+    apiKey,
+    `/agents/${RELEVANCE_AGENT_ID}/tasks/${conversationId}/metadata`
+  );
+}
+
+async function fetchTaskMessages(
+  apiKey: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  return relevanceFetch(
+    apiKey,
+    `/agents/${RELEVANCE_AGENT_ID}/tasks/${conversationId}/view`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        page_size: 1000,
+        cursor: { after: "1970-01-01T00:00:00.000Z" },
+      }),
+    }
+  );
+}
+
+function extractTaskState(metadata: Record<string, unknown>): string | null {
+  const meta = asRecord(metadata.metadata);
+  const conversation = asRecord(meta?.conversation);
+  return (
+    asNonEmptyString(conversation?.state) ??
+    asNonEmptyString(meta?.state) ??
+    asNonEmptyString(metadata.state)
+  );
+}
+
+async function pollRelevanceConversation(
+  apiKey: string,
+  conversationId: string,
+  triggerData: Record<string, unknown>
+): Promise<{ draftText: string; raw: Record<string, unknown> }> {
+  let lastSnapshot: Record<string, unknown> = triggerData;
+
+  for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      await sleep(POLL_INTERVAL_MS);
+    }
+
+    console.info(
+      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} for conversation ${conversationId}`
+    );
+
+    let metadata: Record<string, unknown>;
+    let messages: Record<string, unknown>;
+
+    try {
+      [metadata, messages] = await Promise.all([
+        fetchTaskMetadata(apiKey, conversationId),
+        fetchTaskMessages(apiKey, conversationId),
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Poll request failed";
+      console.warn(`[Relevance poll] Attempt ${attempt} network error: ${message}`);
+      if (attempt === POLL_MAX_ATTEMPTS) {
+        throw new Error(message);
+      }
+      continue;
+    }
+
+    lastSnapshot = { metadata, messages };
+    console.log(
+      `=== RELEVANCE POLL SNAPSHOT (${attempt}/${POLL_MAX_ATTEMPTS}) ===`,
+      JSON.stringify(lastSnapshot, null, 2)
+    );
+
+    const taskState = extractTaskState(metadata);
+    if (taskState && TERMINAL_ERROR_STATES.has(taskState)) {
+      throw new Error(`Relevance agent ended in state "${taskState}".`);
+    }
+
+    const draftFromMessages = extractAgentTextFromViewResults(
+      messages.results as unknown[] | undefined
+    );
+    if (draftFromMessages) {
+      return { draftText: draftFromMessages, raw: lastSnapshot };
+    }
+
+    const draftFromCombined = extractDraftText({ ...metadata, ...messages });
+    if (draftFromCombined) {
+      return { draftText: draftFromCombined, raw: lastSnapshot };
+    }
+
+    if (taskState === "completed") {
+      break;
+    }
+  }
+
+  throw new RelevancePathMappingError(lastSnapshot);
 }
 
 export class RelevancePathMappingError extends Error {
@@ -160,6 +384,7 @@ export interface RelevanceGenerateResult {
   draftText: string;
   jobId: string;
   raw: Record<string, unknown>;
+  polled?: boolean;
 }
 
 export async function callRelevanceAgent(
@@ -214,16 +439,38 @@ export async function callRelevanceAgent(
 
   console.log("=== RAW RELEVANCE AI RESPONSE ===", JSON.stringify(data, null, 2));
 
-  const draftText = extractDraftText(data);
-  if (!draftText) {
-    throw new RelevancePathMappingError(data);
+  const immediateDraft = extractDraftText(data);
+  if (immediateDraft) {
+    const jobId =
+      extractConversationId(data) ??
+      ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
+      "triggered";
+
+    return { draftText: immediateDraft, jobId, raw: data, polled: false };
   }
 
-  const jobId: string =
-    ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
-    (data?.conversation_id as string) ??
-    (data?.id as string) ??
-    "triggered";
+  if (isAsyncPendingResponse(data)) {
+    const conversationId = extractConversationId(data);
+    if (!conversationId) {
+      throw new RelevancePathMappingError(data);
+    }
 
-  return { draftText, jobId, raw: data };
+    console.info(
+      `[Relevance] Async queued response detected (state: ${extractTriggerState(data) ?? "unknown"}). Polling conversation ${conversationId}…`
+    );
+
+    const polled = await pollRelevanceConversation(apiKey, conversationId, data);
+    const jobId =
+      ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
+      conversationId;
+
+    return {
+      draftText: polled.draftText,
+      jobId,
+      raw: polled.raw,
+      polled: true,
+    };
+  }
+
+  throw new RelevancePathMappingError(data);
 }
