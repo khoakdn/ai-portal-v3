@@ -17,31 +17,59 @@ export function readRelevanceEnv(key: string): string {
   return trimmed;
 }
 
-function buildCompiledFormString(formData: Record<string, string>): string {
+const OUTPUT_GUARDRAILS =
+  "CRITICAL REQUIREMENT: You must only return the text draft inside the standard approved schema fields. Do not append, invent, or nest any new JSON keys, metadata properties, or extra fields, as this will trigger a strict schema violation error in our gateway pipeline.";
+
+function pickCoreDetails(formData: Record<string, string>): string {
+  return (
+    formData.productDescription?.trim() ||
+    formData.brief?.trim() ||
+    formData.description?.trim() ||
+    formData.thematicFocus?.trim() ||
+    "Not specified"
+  );
+}
+
+/** Map form fields to plain-text instructions — never raw JSON keys. */
+function buildCleanInstructions(formData: Record<string, string>): string {
   const lines = [
-    `**Product / Announcement Title:** ${formData.title ?? ""}`,
-    `**Press Release Type:** ${formData.pressReleaseType ?? ""}`,
-    `**Business Unit:** ${formData.businessUnit ?? ""}`,
-    `**Region:** ${formData.region ?? ""}`,
-    `**Language:** ${formData.language ?? ""}`,
-    `**Target Audience / Thematic Focus:** ${formData.thematicFocus ?? ""}`,
-    `**Products to Address:** ${formData.productsToAddress ?? formData.deltaProducts ?? ""}`,
-    `**Core Features & Description:** ${formData.productDescription ?? formData.brief ?? ""}`,
-    `**Tone & Style:** Professional, corporate, aligned with Delta Electronics brand voice`,
-    `**Priority:** ${formData.priority ?? "Standard"}`,
-    `**Deadline:** ${formData.deadline ?? "Not specified"}`,
-    `**Existing Systems / Context:** ${formData.existingSystems ?? "N/A"}`,
-    `**Test Reports / Evidence:** ${formData.testReports ?? "N/A"}`,
-    `**Reference Material Links:** ${formData.infoMaterialLinks ?? "N/A"}`,
-    `**Contact Person:** ${formData.contactPerson ?? "N/A"}`,
+    "Please write a professional press release draft based on these specific inputs:",
+    `- Headline Title: ${formData.title?.trim() || "Untitled"}`,
+    `- Press Release Type: ${formData.pressReleaseType?.trim() || "Corporate Announcement"}`,
+    `- Business Unit: ${formData.businessUnit?.trim() || "Marketing Communications"}`,
+    `- Target Region: ${formData.region?.trim() || "EMEA"}`,
+    `- Language: ${formData.language?.trim() || "English"}`,
+    `- Target Audience / Focus: ${formData.thematicFocus?.trim() || pickCoreDetails(formData)}`,
+    `- Products to Address: ${formData.productsToAddress?.trim() || formData.deltaProducts?.trim() || "As described in core details"}`,
+    `- Core Details: ${pickCoreDetails(formData)}`,
+    "- Tone and Style: Professional, corporate, aligned with Delta Electronics brand voice",
   ];
+
+  if (formData.priority?.trim()) {
+    lines.push(`- Priority: ${formData.priority.trim()}`);
+  }
+  if (formData.deadline?.trim()) {
+    lines.push(`- Deadline: ${formData.deadline.trim()}`);
+  }
+  if (formData.existingSystems?.trim()) {
+    lines.push(`- Existing Systems / Context: ${formData.existingSystems.trim()}`);
+  }
+  if (formData.testReports?.trim()) {
+    lines.push(`- Test Reports / Evidence: ${formData.testReports.trim()}`);
+  }
+  if (formData.infoMaterialLinks?.trim()) {
+    lines.push(`- Reference Material Links: ${formData.infoMaterialLinks.trim()}`);
+  }
+  if (formData.contactPerson?.trim()) {
+    lines.push(`- Contact Person: ${formData.contactPerson.trim()}`);
+  }
 
   return lines.join("\n");
 }
 
 export function buildRelevanceMessageContent(formData: Record<string, string>): string {
-  const compiled = buildCompiledFormString(formData);
-  return `Generate a professional press release with the following details:\n${compiled}`;
+  const cleanInstructions = buildCleanInstructions(formData);
+  return `${cleanInstructions}\n\n${OUTPUT_GUARDRAILS}`;
 }
 
 export function extractDraftText(data: Record<string, unknown>): string | null {
@@ -87,13 +115,18 @@ export async function callRelevanceAgent(
     throw new Error("RELEVANCE_AI_API_KEY is not configured.");
   }
 
-  const payload = {
+  const relevancePayload = {
     message: {
       role: "user" as const,
       content: buildRelevanceMessageContent(formData),
     },
     agent_id: RELEVANCE_AGENT_ID,
   };
+
+  console.log(
+    "Sending clean payload to Relevance:",
+    JSON.stringify(relevancePayload, null, 2)
+  );
 
   let response: Response;
   try {
@@ -103,7 +136,7 @@ export async function callRelevanceAgent(
         "Content-Type": "application/json",
         Authorization: apiKey,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(relevancePayload),
       cache: "no-store",
     });
   } catch (err) {
