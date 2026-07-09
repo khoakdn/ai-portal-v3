@@ -1,9 +1,7 @@
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 import { NextResponse } from "next/server";
-
-const RELEVANCE_ENDPOINT =
-  "https://api-d7b62b.stack.tryrelevance.com/latest/agents/trigger";
-
-const DEFAULT_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
 /** Strip optional surrounding quotes from env values. */
 function readEnv(key: string): string {
@@ -19,19 +17,6 @@ function readEnv(key: string): string {
   return trimmed;
 }
 
-function resolveApiKey(): string {
-  return readEnv("RELEVANCE_AI_API_KEY") || readEnv("RELEVANCE_API_KEY");
-}
-
-function resolveAgentId(): string {
-  return (
-    readEnv("RELEVANCE_AI_AGENT_ID") ||
-    readEnv("RELEVANCE_AGENT_ID") ||
-    DEFAULT_AGENT_ID
-  );
-}
-
-/** Compile form inputs into a markdown brief for the agent. */
 function buildCompiledFormString(formData: Record<string, string>): string {
   const lines = [
     `**Product / Announcement Title:** ${formData.title ?? ""}`,
@@ -101,15 +86,28 @@ ${title}
 
 ${region}, ${today} — Delta Electronics, a global leader in power and thermal management solutions, today announced a significant advancement in its ${businessUnit} portfolio.
 
-[SIMULATION MODE — set RELEVANCE_AI_API_KEY in .env.local to enable live generation]`;
+[SIMULATION MODE — set RELEVANCE_AI_API_KEY in Vercel environment variables to enable live generation]`;
 }
 
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+};
+
 export async function POST(req: Request) {
+  const relevanceEndpoint =
+    "https://api-d7b62b.stack.tryrelevance.com/latest/agents/trigger";
+  const defaultAgentId = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
+
   try {
     const body: Record<string, string> = await req.json();
 
-    const apiKey = resolveApiKey();
-    const agentId = resolveAgentId();
+    const apiKey =
+      readEnv("RELEVANCE_AI_API_KEY") || readEnv("RELEVANCE_API_KEY");
+    const agentId =
+      readEnv("RELEVANCE_AI_AGENT_ID") ||
+      readEnv("RELEVANCE_AGENT_ID") ||
+      defaultAgentId;
 
     if (!apiKey) {
       console.info(
@@ -117,16 +115,19 @@ export async function POST(req: Request) {
       );
       await new Promise((r) => setTimeout(r, 2000));
 
-      return NextResponse.json({
-        success: true,
-        draft: buildSimulatedDraft(
-          body.title ?? "Press Release",
-          body.businessUnit ?? "Marketing",
-          body.region ?? "EMEA"
-        ),
-        simulated: true,
-        jobId: `sim_${Date.now()}`,
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          draft: buildSimulatedDraft(
+            body.title ?? "Press Release",
+            body.businessUnit ?? "Marketing",
+            body.region ?? "EMEA"
+          ),
+          simulated: true,
+          jobId: `sim_${Date.now()}`,
+        },
+        { headers: NO_CACHE_HEADERS }
+      );
     }
 
     const payload = {
@@ -137,13 +138,14 @@ export async function POST(req: Request) {
       agent_id: agentId,
     };
 
-    const response = await fetch(RELEVANCE_ENDPOINT, {
+    const response = await fetch(relevanceEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: apiKey,
       },
       body: JSON.stringify(payload),
+      cache: "no-store",
     });
 
     if (!response.ok) {
@@ -154,7 +156,7 @@ export async function POST(req: Request) {
           success: false,
           error: `Relevance AI returned ${response.status}. ${errorText}`.trim(),
         },
-        { status: 502 }
+        { status: 502, headers: NO_CACHE_HEADERS }
       );
     }
 
@@ -169,18 +171,24 @@ export async function POST(req: Request) {
     const draft = extractDraftText(data);
 
     console.info(
-      `[/api/relevance/press-release] Agent ${agentId} triggered. Job: ${jobId}. Draft: ${!!draft}`
+      `[/api/relevance/press-release] Agent ${agentId} triggered. Job: ${jobId}. Draft: ${!!draft}. Key present: true`
     );
 
-    return NextResponse.json({
-      success: true,
-      draft,
-      jobId,
-      simulated: false,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        draft,
+        jobId,
+        simulated: false,
+      },
+      { headers: NO_CACHE_HEADERS }
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[/api/relevance/press-release] Unexpected error:", message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500, headers: NO_CACHE_HEADERS }
+    );
   }
 }

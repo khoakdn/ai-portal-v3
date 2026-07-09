@@ -986,19 +986,29 @@ export function PressReleaseStudio() {
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
     setTriggerError(null);
+    setIsSimulated(false);
+    setAgentResult(null);
+    setDraftBody("");
     setPhase("fill-form");
   }
 
   // ── Primary path: call /api/relevance/press-release, then show draft ──
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
+    setIsSimulated(false);
+    setAgentResult(null);
+    setDraftBody("");
     setCurrentTitle(title);
     setCurrentCtx(ctx);
     startTrigger(async () => {
       try {
         const res = await fetch("/api/relevance/press-release", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          },
+          cache: "no-store",
           body: JSON.stringify({
             title,
             pressReleaseType:   ctx.pressReleaseType,
@@ -1025,16 +1035,15 @@ export function PressReleaseStudio() {
         }
 
         if (data.draft) {
-          // Agent returned the draft immediately — transition to review
           setDraftBody(data.draft as string);
-          setIsSimulated(data.simulated ?? false);
+          setIsSimulated(Boolean(data.simulated));
           setPhase("review");
         } else {
-          // Agent was triggered but output is async (job queued) — show confirmation
           setAgentResult({
-            jobId:     (data.jobId as string) ?? "triggered",
-            simulated: data.simulated ?? false,
+            jobId: (data.jobId as string) ?? "triggered",
+            simulated: Boolean(data.simulated),
           });
+          setIsSimulated(Boolean(data.simulated));
           setPhase("agent-submitted");
         }
       } catch {
@@ -1270,7 +1279,13 @@ export function PressReleaseStudio() {
       {phase === "fill-form" && selectedType && (
         <DetailedForm
           selectedType={selectedType}
-          onBack={() => setPhase("select-type")}
+          onBack={() => {
+            setTriggerError(null);
+            setIsSimulated(false);
+            setAgentResult(null);
+            setDraftBody("");
+            setPhase("select-type");
+          }}
           onAgentTrigger={handleAgentTrigger}
           isTriggering={isTriggering}
           triggerError={triggerError}
