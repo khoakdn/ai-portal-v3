@@ -696,16 +696,14 @@ function DetailedForm({
           {isTriggering && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <p>
-                AI Agent is queued and waiting for capacity... processing your layout.
-              </p>
+              <p>Generating your press release draft — this usually takes a few seconds.</p>
             </div>
           )}
 
           {/* Submit */}
           <Button type="submit" disabled={isTriggering} className="w-full" size="lg">
             {isTriggering
-              ? <><Loader2 className="h-4 w-4 animate-spin" />AI Agent is queued and waiting for capacity…</>
+              ? <><Loader2 className="h-4 w-4 animate-spin" />Generating press release draft…</>
               : <><Zap className="h-4 w-4" />Send to AI Agent</>}
           </Button>
         </div>

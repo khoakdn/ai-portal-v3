@@ -2,7 +2,11 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
 import { NextResponse } from "next/server";
-import { callRelevanceAgent, formatRelevanceApiError, RELEVANCE_AGENT_ID } from "@/lib/integrations/relevance-generate";
+import {
+  callRelevanceAgent,
+  formatRelevanceApiError,
+  RELEVANCE_AGENT_ID,
+} from "@/lib/integrations/relevance-generate";
 
 const NO_CACHE_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -20,6 +24,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // Single-shot agent: draftText from output.output | output.text | output.reply | reply
     const { draftText, jobId } = await callRelevanceAgent(body);
 
     console.info(

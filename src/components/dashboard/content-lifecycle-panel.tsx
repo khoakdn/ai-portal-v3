@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -28,6 +28,13 @@ export function ContentLifecyclePanel() {
 
   const [isGenerating, startGenerate] = useTransition();
   const [isAssigning, startAssign] = useTransition();
+  const draftPreviewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (draftText && draftPreviewRef.current) {
+      draftPreviewRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [draftText]);
 
   function handleGenerate() {
     setGenerateError(null);
@@ -190,7 +197,7 @@ export function ContentLifecyclePanel() {
             {isGenerating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                AI Agent is queued and waiting for capacity…
+                Generating press release draft…
               </>
             ) : (
               <>
@@ -203,9 +210,7 @@ export function ContentLifecyclePanel() {
           {isGenerating && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <p>
-                AI Agent is queued and waiting for capacity... processing your layout.
-              </p>
+              <p>Generating your press release draft — this usually takes a few seconds.</p>
             </div>
           )}
 
@@ -229,7 +234,7 @@ export function ContentLifecyclePanel() {
 
         {/* Draft preview */}
         {draftText && (
-          <div className="animate-fade-in space-y-4">
+          <div ref={draftPreviewRef} className="animate-fade-in space-y-4">
             <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
                 <div className="flex items-center gap-2">

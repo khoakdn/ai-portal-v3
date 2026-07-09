@@ -3,25 +3,6 @@ export const RELEVANCE_ENDPOINT =
 
 export const RELEVANCE_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
-const POLL_MAX_ATTEMPTS = 10;
-const POLL_INTERVAL_MS = 3000;
-
-const PENDING_TRIGGER_STATES = new Set([
-  "waiting-for-capacity",
-  "starting-up",
-  "queued-for-approval",
-  "queued-for-rerun",
-  "running",
-  "idle",
-]);
-
-const TERMINAL_ERROR_STATES = new Set([
-  "timed-out",
-  "unrecoverable",
-  "errored-pending-approval",
-  "cancelled",
-]);
-
 /** Strip optional surrounding quotes from env values. */
 export function readRelevanceEnv(key: string): string {
   const raw = process.env[key];
@@ -34,12 +15,6 @@ export function readRelevanceEnv(key: string): string {
     return trimmed.slice(1, -1).trim();
   }
   return trimmed;
-}
-
-function getRelevanceBaseUrl(): string {
-  const fromEnv = readRelevanceEnv("RELEVANCE_AI_REGION_BASE_URL");
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return "https://api-d7b62b.stack.tryrelevance.com/latest";
 }
 
 const OUTPUT_GUARDRAILS =
@@ -70,31 +45,22 @@ function buildCleanInstructions(formData: Record<string, string>): string {
     "- Tone and Style: Professional, corporate, aligned with Delta Electronics brand voice",
   ];
 
-  if (formData.priority?.trim()) {
-    lines.push(`- Priority: ${formData.priority.trim()}`);
-  }
-  if (formData.deadline?.trim()) {
-    lines.push(`- Deadline: ${formData.deadline.trim()}`);
-  }
+  if (formData.priority?.trim()) lines.push(`- Priority: ${formData.priority.trim()}`);
+  if (formData.deadline?.trim()) lines.push(`- Deadline: ${formData.deadline.trim()}`);
   if (formData.existingSystems?.trim()) {
     lines.push(`- Existing Systems / Context: ${formData.existingSystems.trim()}`);
   }
-  if (formData.testReports?.trim()) {
-    lines.push(`- Test Reports / Evidence: ${formData.testReports.trim()}`);
-  }
+  if (formData.testReports?.trim()) lines.push(`- Test Reports / Evidence: ${formData.testReports.trim()}`);
   if (formData.infoMaterialLinks?.trim()) {
     lines.push(`- Reference Material Links: ${formData.infoMaterialLinks.trim()}`);
   }
-  if (formData.contactPerson?.trim()) {
-    lines.push(`- Contact Person: ${formData.contactPerson.trim()}`);
-  }
+  if (formData.contactPerson?.trim()) lines.push(`- Contact Person: ${formData.contactPerson.trim()}`);
 
   return lines.join("\n");
 }
 
 export function buildRelevanceMessageContent(formData: Record<string, string>): string {
-  const cleanInstructions = buildCleanInstructions(formData);
-  return `${cleanInstructions}\n\n${OUTPUT_GUARDRAILS}`;
+  return `${buildCleanInstructions(formData)}\n\n${OUTPUT_GUARDRAILS}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -109,243 +75,49 @@ function asNonEmptyString(value: unknown): string | null {
   return null;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Convert simple HTML agent output into editable plain text. */
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-function extractTriggerState(data: Record<string, unknown>): string | null {
-  const meta = asRecord(data.metadata);
-  const conversation = asRecord(meta?.conversation);
-  return (
-    asNonEmptyString(data.state) ??
-    asNonEmptyString(conversation?.state) ??
-    asNonEmptyString(meta?.state)
-  );
-}
-
-export function isAsyncPendingResponse(data: Record<string, unknown>): boolean {
-  if (extractDraftText(data)) return false;
-
-  const state = extractTriggerState(data);
-  if (state && PENDING_TRIGGER_STATES.has(state)) return true;
-
-  if (asRecord(data.job_info) && asNonEmptyString(data.conversation_id)) {
-    return true;
+function normalizeDraftValue(value: unknown): string | null {
+  const direct = asNonEmptyString(value);
+  if (!direct) return null;
+  if (/<[a-z][\s\S]*>/i.test(direct)) {
+    return htmlToPlainText(direct) || direct;
   }
-
-  return false;
+  return direct;
 }
 
-export function extractConversationId(data: Record<string, unknown>): string | null {
-  return (
-    asNonEmptyString(data.conversation_id) ??
-    asNonEmptyString(asRecord(data.job_info)?.conversation_id)
-  );
-}
-
+/**
+ * Extract press release markdown/text from a direct Relevance trigger payload.
+ * Single-shot responses only — no chat history or polling paths.
+ */
 export function extractDraftText(data: Record<string, unknown>): string | null {
   const output = data.output;
   const outputObj = asRecord(output);
 
   const draftText =
-    asNonEmptyString(outputObj?.output) ||
-    asNonEmptyString(outputObj?.reply) ||
-    asNonEmptyString(data.reply) ||
-    asNonEmptyString(data.response) ||
-    (typeof output === "string" ? asNonEmptyString(output) : null);
+    normalizeDraftValue(outputObj?.output) ||
+    normalizeDraftValue(outputObj?.text) ||
+    normalizeDraftValue(outputObj?.html) ||
+    normalizeDraftValue(outputObj?.reply) ||
+    normalizeDraftValue(data.reply) ||
+    (typeof output === "string" ? normalizeDraftValue(output) : null);
 
-  if (draftText) return draftText;
-
-  if (outputObj) {
-    const nested =
-      asNonEmptyString(outputObj.answer) ||
-      asNonEmptyString(outputObj.text) ||
-      asNonEmptyString(outputObj.content) ||
-      asNonEmptyString(outputObj.message) ||
-      asNonEmptyString(outputObj.draft) ||
-      asNonEmptyString(outputObj.result);
-    if (nested) return nested;
-  }
-
-  if (asNonEmptyString(data.answer)) return asNonEmptyString(data.answer);
-  if (asNonEmptyString(data.text)) return asNonEmptyString(data.text);
-
-  const msg = asRecord(data.message);
-  if (asNonEmptyString(msg?.content)) return asNonEmptyString(msg?.content);
-
-  const msgs = (data.messages ?? data.message_history) as unknown[] | undefined;
-  if (Array.isArray(msgs) && msgs.length > 0) {
-    const last = asRecord(msgs[msgs.length - 1]);
-    const content = last?.content ?? last?.text ?? last?.reply;
-    if (asNonEmptyString(content)) return asNonEmptyString(content);
-  }
-
-  const viewResults = data.results as unknown[] | undefined;
-  const fromView = extractAgentTextFromViewResults(viewResults);
-  if (fromView) return fromView;
-
-  return null;
-}
-
-function extractAgentTextFromViewResults(results: unknown[] | undefined): string | null {
-  if (!Array.isArray(results) || results.length === 0) return null;
-
-  for (let i = results.length - 1; i >= 0; i--) {
-    const item = asRecord(results[i]);
-    const content = asRecord(item?.content);
-    if (!content) continue;
-
-    if (content.type === "agent-message") {
-      if (content.generating === true) continue;
-      const text = asNonEmptyString(content.text);
-      if (text) return text;
-    }
-
-    const nestedText =
-      asNonEmptyString(content.text) ||
-      asNonEmptyString(content.output) ||
-      asNonEmptyString(content.reply);
-    if (nestedText && content.type !== "user-message") {
-      return nestedText;
-    }
-  }
-
-  return null;
-}
-
-async function relevanceFetch(
-  apiKey: string,
-  path: string,
-  init?: RequestInit
-): Promise<Record<string, unknown>> {
-  const baseUrl = getRelevanceBaseUrl();
-  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: apiKey,
-        ...init?.headers,
-      },
-      cache: "no-store",
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Network request failed";
-    throw new Error(`Relevance poll request failed: ${message}`);
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `Relevance poll returned ${response.status} for ${path}. ${errorText}`.trim()
-    );
-  }
-
-  return (await response.json()) as Record<string, unknown>;
-}
-
-async function fetchTaskMetadata(
-  apiKey: string,
-  conversationId: string
-): Promise<Record<string, unknown>> {
-  return relevanceFetch(
-    apiKey,
-    `/agents/${RELEVANCE_AGENT_ID}/tasks/${conversationId}/metadata`
-  );
-}
-
-async function fetchTaskMessages(
-  apiKey: string,
-  conversationId: string
-): Promise<Record<string, unknown>> {
-  return relevanceFetch(
-    apiKey,
-    `/agents/${RELEVANCE_AGENT_ID}/tasks/${conversationId}/view`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        page_size: 1000,
-        cursor: { after: "1970-01-01T00:00:00.000Z" },
-      }),
-    }
-  );
-}
-
-function extractTaskState(metadata: Record<string, unknown>): string | null {
-  const meta = asRecord(metadata.metadata);
-  const conversation = asRecord(meta?.conversation);
-  return (
-    asNonEmptyString(conversation?.state) ??
-    asNonEmptyString(meta?.state) ??
-    asNonEmptyString(metadata.state)
-  );
-}
-
-async function pollRelevanceConversation(
-  apiKey: string,
-  conversationId: string,
-  triggerData: Record<string, unknown>
-): Promise<{ draftText: string; raw: Record<string, unknown> }> {
-  let lastSnapshot: Record<string, unknown> = triggerData;
-
-  for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
-    if (attempt > 1) {
-      await sleep(POLL_INTERVAL_MS);
-    }
-
-    console.info(
-      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} for conversation ${conversationId}`
-    );
-
-    let metadata: Record<string, unknown>;
-    let messages: Record<string, unknown>;
-
-    try {
-      [metadata, messages] = await Promise.all([
-        fetchTaskMetadata(apiKey, conversationId),
-        fetchTaskMessages(apiKey, conversationId),
-      ]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Poll request failed";
-      console.warn(`[Relevance poll] Attempt ${attempt} network error: ${message}`);
-      if (attempt === POLL_MAX_ATTEMPTS) {
-        throw new Error(message);
-      }
-      continue;
-    }
-
-    lastSnapshot = { metadata, messages };
-    console.log(
-      `=== RELEVANCE POLL SNAPSHOT (${attempt}/${POLL_MAX_ATTEMPTS}) ===`,
-      JSON.stringify(lastSnapshot, null, 2)
-    );
-
-    const taskState = extractTaskState(metadata);
-    if (taskState && TERMINAL_ERROR_STATES.has(taskState)) {
-      throw new Error(`Relevance agent ended in state "${taskState}".`);
-    }
-
-    const draftFromMessages = extractAgentTextFromViewResults(
-      messages.results as unknown[] | undefined
-    );
-    if (draftFromMessages) {
-      return { draftText: draftFromMessages, raw: lastSnapshot };
-    }
-
-    const draftFromCombined = extractDraftText({ ...metadata, ...messages });
-    if (draftFromCombined) {
-      return { draftText: draftFromCombined, raw: lastSnapshot };
-    }
-
-    if (taskState === "completed") {
-      break;
-    }
-  }
-
-  throw new RelevancePathMappingError(lastSnapshot);
+  return draftText;
 }
 
 export class RelevancePathMappingError extends Error {
@@ -384,7 +156,6 @@ export interface RelevanceGenerateResult {
   draftText: string;
   jobId: string;
   raw: Record<string, unknown>;
-  polled?: boolean;
 }
 
 export async function callRelevanceAgent(
@@ -439,38 +210,16 @@ export async function callRelevanceAgent(
 
   console.log("=== RAW RELEVANCE AI RESPONSE ===", JSON.stringify(data, null, 2));
 
-  const immediateDraft = extractDraftText(data);
-  if (immediateDraft) {
-    const jobId =
-      extractConversationId(data) ??
-      ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
-      "triggered";
-
-    return { draftText: immediateDraft, jobId, raw: data, polled: false };
+  const draftText = extractDraftText(data);
+  if (!draftText) {
+    throw new RelevancePathMappingError(data);
   }
 
-  if (isAsyncPendingResponse(data)) {
-    const conversationId = extractConversationId(data);
-    if (!conversationId) {
-      throw new RelevancePathMappingError(data);
-    }
+  const jobId: string =
+    asNonEmptyString(data.conversation_id) ??
+    asNonEmptyString(asRecord(data.job_info)?.job_id) ??
+    asNonEmptyString(data.id) ??
+    "triggered";
 
-    console.info(
-      `[Relevance] Async queued response detected (state: ${extractTriggerState(data) ?? "unknown"}). Polling conversation ${conversationId}…`
-    );
-
-    const polled = await pollRelevanceConversation(apiKey, conversationId, data);
-    const jobId =
-      ((data?.job_info as Record<string, unknown>)?.job_id as string) ??
-      conversationId;
-
-    return {
-      draftText: polled.draftText,
-      jobId,
-      raw: polled.raw,
-      polled: true,
-    };
-  }
-
-  throw new RelevancePathMappingError(data);
+  return { draftText, jobId, raw: data };
 }
