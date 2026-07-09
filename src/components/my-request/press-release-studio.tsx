@@ -996,6 +996,7 @@ export function PressReleaseStudio() {
           cache: "no-store",
           body: JSON.stringify({
             title,
+            prType:             selectedType?.id ?? "product_launch",
             pressReleaseType:   ctx.pressReleaseType,
             region:             ctx.region,
             language:           ctx.language,

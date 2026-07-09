@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Single-shot agent: draftText from output.output | output.text | output.reply | reply
+    // Briefing JSON is assembled in buildRelevanceMessageContent from prType + form fields.
     const { draftText, jobId } = await callRelevanceAgent(body);
 
     console.info(

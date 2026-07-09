@@ -18,49 +18,105 @@ export function readRelevanceEnv(key: string): string {
 }
 
 const OUTPUT_GUARDRAILS =
-  "CRITICAL REQUIREMENT: You must only return the text draft inside the standard approved schema fields. Do not append, invent, or nest any new JSON keys, metadata properties, or extra fields, as this will trigger a strict schema violation error in our gateway pipeline.";
+  "Please draft the Delta Electronics press release following the strict style guidelines and structural constraints.";
 
-function pickCoreDetails(formData: Record<string, string>): string {
-  return (
-    formData.productDescription?.trim() ||
-    formData.brief?.trim() ||
-    formData.description?.trim() ||
-    formData.thematicFocus?.trim() ||
-    "Not specified"
-  );
+type BriefingKey =
+  | "new_product"
+  | "event_exhibition"
+  | "case_study_success_story"
+  | "article_questionnaire";
+
+interface BriefingData {
+  region: string;
+  product_name: string;
+  launch_date: string;
+  features: string[];
+  key_messages: string;
+  quote: string;
+  strategic_priorities: string;
 }
 
-/** Map form fields to plain-text instructions — never raw JSON keys. */
-function buildCleanInstructions(formData: Record<string, string>): string {
-  const lines = [
-    "Please write a professional press release draft based on these specific inputs:",
-    `- Headline Title: ${formData.title?.trim() || "Untitled"}`,
-    `- Press Release Type: ${formData.pressReleaseType?.trim() || "Corporate Announcement"}`,
-    `- Business Unit: ${formData.businessUnit?.trim() || "Marketing Communications"}`,
-    `- Target Region: ${formData.region?.trim() || "EMEA"}`,
-    `- Language: ${formData.language?.trim() || "English"}`,
-    `- Target Audience / Focus: ${formData.thematicFocus?.trim() || pickCoreDetails(formData)}`,
-    `- Products to Address: ${formData.productsToAddress?.trim() || formData.deltaProducts?.trim() || "As described in core details"}`,
-    `- Core Details: ${pickCoreDetails(formData)}`,
-    "- Tone and Style: Professional, corporate, aligned with Delta Electronics brand voice",
-  ];
-
-  if (formData.priority?.trim()) lines.push(`- Priority: ${formData.priority.trim()}`);
-  if (formData.deadline?.trim()) lines.push(`- Deadline: ${formData.deadline.trim()}`);
-  if (formData.existingSystems?.trim()) {
-    lines.push(`- Existing Systems / Context: ${formData.existingSystems.trim()}`);
-  }
-  if (formData.testReports?.trim()) lines.push(`- Test Reports / Evidence: ${formData.testReports.trim()}`);
-  if (formData.infoMaterialLinks?.trim()) {
-    lines.push(`- Reference Material Links: ${formData.infoMaterialLinks.trim()}`);
-  }
-  if (formData.contactPerson?.trim()) lines.push(`- Contact Person: ${formData.contactPerson.trim()}`);
-
-  return lines.join("\n");
+function parseFeaturesArray(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  return value
+    .split(/[\n,;|]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
+function resolvePrType(formData: Record<string, string>): string {
+  if (formData.prType?.trim()) return formData.prType.trim();
+
+  const label = formData.pressReleaseType?.trim().toLowerCase() ?? "";
+  if (label.includes("product launch")) return "product_launch";
+  if (label.includes("event")) return "event";
+  if (label.includes("case study")) return "case_study";
+  if (label.includes("article")) return "article";
+
+  return "product_launch";
+}
+
+function resolveBriefingKey(prType: string): BriefingKey {
+  const normalized = prType.toLowerCase().replace(/\s+/g, "_");
+
+  switch (normalized) {
+    case "product_launch":
+      return "new_product";
+    case "event":
+    case "event_announcement":
+    case "event_exhibition":
+      return "event_exhibition";
+    case "case_study":
+    case "case_study_success_story":
+      return "case_study_success_story";
+    case "article":
+    case "article_questionnaire":
+    case "general":
+      return "article_questionnaire";
+    default:
+      return "new_product";
+  }
+}
+
+function buildBriefingData(formData: Record<string, string>): BriefingData {
+  const featuresSource =
+    formData.features ||
+    formData.productsToAddress ||
+    formData.productDescription ||
+    "";
+
+  return {
+    region: formData.region?.trim() || "",
+    product_name: formData.productName?.trim() || formData.title?.trim() || "",
+    launch_date: formData.launchDate?.trim() || formData.deadline?.trim() || "",
+    features: parseFeaturesArray(featuresSource),
+    key_messages:
+      formData.keyMessages?.trim() ||
+      formData.thematicFocus?.trim() ||
+      formData.brief?.trim() ||
+      "",
+    quote: formData.quote?.trim() || formData.contactPerson?.trim() || "",
+    strategic_priorities:
+      formData.strategicPriorities?.trim() ||
+      [formData.businessUnit, formData.existingSystems].filter(Boolean).join(" · ") ||
+      "",
+  };
+}
+
+/** Build Relevance message content with the authorized briefing JSON block. */
 export function buildRelevanceMessageContent(formData: Record<string, string>): string {
-  return `${buildCleanInstructions(formData)}\n\n${OUTPUT_GUARDRAILS}`;
+  const prType = resolvePrType(formData);
+  const matchingKey = resolveBriefingKey(prType);
+  const briefingData = buildBriefingData(formData);
+
+  return `PR Type: ${prType}
+
+Here is the official authorized briefing JSON object:
+\`\`\`json
+${JSON.stringify({ [matchingKey]: briefingData }, null, 2)}
+\`\`\`
+
+${OUTPUT_GUARDRAILS}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

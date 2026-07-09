@@ -61,10 +61,12 @@ export function ContentLifecyclePanel() {
           cache: "no-store",
           body: JSON.stringify({
             title: formTitle.trim(),
+            prType: "product_launch",
             thematicFocus: brief.trim() || "General corporate announcement",
             productDescription: brief.trim(),
+            productsToAddress: brief.trim(),
             businessUnit,
-            pressReleaseType: "Corporate Announcement",
+            pressReleaseType: "Product Launch",
             region: "EMEA",
             language: "English",
           }),
