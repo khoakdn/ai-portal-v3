@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import {
   callRelevanceAgent,
   formatRelevanceApiError,
+  normalizeIncomingBody,
   resolveAgentId,
 } from "@/lib/integrations/relevance-generate";
 
@@ -16,9 +17,10 @@ const NO_CACHE_HEADERS = {
 
 export async function POST(req: Request) {
   try {
-    const body: Record<string, string> = await req.json();
+    const body = await req.json();
+    const incoming = normalizeIncomingBody(body);
 
-    if (!body.title?.trim()) {
+    if (!incoming.title?.trim() && !incoming.productName?.trim()) {
       return NextResponse.json(
         { success: false, error: "title is required." },
         { status: 400, headers: NO_CACHE_HEADERS }
@@ -28,7 +30,7 @@ export async function POST(req: Request) {
     const result = await callRelevanceAgent(body);
 
     if (!result.success) {
-      console.warn("[/api/generate] Empty or unmapped agent response:", result.error);
+      console.warn("[/api/generate] Agent response issue:", result.error);
       return NextResponse.json(
         {
           success: false,
@@ -36,7 +38,7 @@ export async function POST(req: Request) {
           debugPayload: result.debugPayload,
           jobId: result.jobId,
         },
-        { status: 200, headers: NO_CACHE_HEADERS }
+        { status: result.status ?? 200, headers: NO_CACHE_HEADERS }
       );
     }
 

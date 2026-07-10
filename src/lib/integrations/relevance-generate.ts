@@ -59,8 +59,139 @@ export interface RelevanceAgentParams {
   region: string;
   product_name: string;
   launch_date: string;
-  key_messages: string[];
+  key_messages: string[] | string;
   features: string[];
+  quote?: string;
+  strategic_priorities?: string;
+  new_product: StructuredBriefing;
+  event_exhibition: StructuredBriefing;
+  case_study_success_story: StructuredBriefing;
+  article_questionnaire: StructuredBriefing;
+}
+
+export interface StructuredBriefing {
+  region: string;
+  product_name: string;
+  launch_date: string;
+  features: string[];
+  key_messages: string;
+  quote: string;
+  strategic_priorities: string;
+}
+
+export interface NormalizedIncoming {
+  prType: string;
+  region: string;
+  productName: string;
+  launchDate: string;
+  keyMessages: string;
+  quote: string;
+  strategicPriorities: string;
+  features: string[];
+  title: string;
+}
+
+const AGENT_DIAGNOSTIC_PATTERNS = [
+  "Missing Input Stopped Output",
+  "LLM Returned No Text",
+];
+
+function stringField(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function normalizeFeaturesValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => stringField(item)).filter(Boolean);
+  }
+  const single = stringField(value);
+  if (!single) return [];
+  return parseListValue(single);
+}
+
+/** Universal extractor — flat keys, nested formData, or briefingData. */
+export function normalizeIncomingBody(body: unknown): NormalizedIncoming {
+  const root = asRecord(body) ?? {};
+  const incoming = asRecord(root.formData) ?? asRecord(root.briefingData) ?? root;
+
+  const prType =
+    stringField(incoming.prType) ||
+    stringField(incoming.type) ||
+    "product_launch";
+  const region = stringField(incoming.region) || "EMEA";
+  const productName =
+    stringField(incoming.productName) ||
+    stringField(incoming.product_name) ||
+    stringField(incoming.title) ||
+    "";
+  const launchDate =
+    stringField(incoming.launchDate) ||
+    stringField(incoming.launch_date) ||
+    stringField(incoming.deadline) ||
+    "";
+  const keyMessages =
+    stringField(incoming.keyMessages) ||
+    stringField(incoming.key_messages) ||
+    stringField(incoming.thematicFocus) ||
+    stringField(incoming.brief) ||
+    "";
+  const quote =
+    stringField(incoming.quote) || stringField(incoming.contactPerson) || "";
+  const strategicPriorities =
+    stringField(incoming.strategicPriorities) ||
+    stringField(incoming.strategic_priorities) ||
+    stringField(incoming.businessUnit) ||
+    "";
+
+  let features = normalizeFeaturesValue(incoming.features);
+  if (features.length === 0) {
+    features = normalizeFeaturesValue(
+      incoming.productsToAddress ?? incoming.productDescription
+    );
+  }
+
+  return {
+    prType,
+    region,
+    productName,
+    launchDate,
+    keyMessages,
+    quote,
+    strategicPriorities,
+    features,
+    title: stringField(incoming.title) || productName,
+  };
+}
+
+/** Flat string map for legacy briefing builders. */
+export function normalizedToFormData(normalized: NormalizedIncoming): Record<string, string> {
+  return {
+    prType: normalized.prType,
+    type: normalized.prType,
+    region: normalized.region,
+    productName: normalized.productName,
+    product_name: normalized.productName,
+    title: normalized.title,
+    launchDate: normalized.launchDate,
+    launch_date: normalized.launchDate,
+    deadline: normalized.launchDate,
+    keyMessages: normalized.keyMessages,
+    key_messages: normalized.keyMessages,
+    thematicFocus: normalized.keyMessages,
+    brief: normalized.keyMessages,
+    quote: normalized.quote,
+    strategicPriorities: normalized.strategicPriorities,
+    strategic_priorities: normalized.strategicPriorities,
+    features: normalized.features.join(", "),
+    productsToAddress: normalized.features.join(", "),
+    pressReleaseType: normalized.prType,
+  };
+}
+
+function isAgentDiagnosticError(text: string): boolean {
+  return AGENT_DIAGNOSTIC_PATTERNS.some((pattern) => text.includes(pattern));
 }
 
 function parseListValue(value: string | undefined): string[] {
@@ -108,15 +239,31 @@ export function buildBriefingData(formData: Record<string, string>): BriefingDat
   };
 }
 
-export function buildAgentParams(briefing: BriefingData): RelevanceAgentParams {
+export function buildAgentParams(normalized: NormalizedIncoming): RelevanceAgentParams {
+  const structuredBriefing: StructuredBriefing = {
+    region: normalized.region || "EMEA",
+    product_name: normalized.productName || "[Product Name]",
+    launch_date: normalized.launchDate || "[Launch Date]",
+    features: normalized.features.length > 0 ? normalized.features : [],
+    key_messages: normalized.keyMessages || "",
+    quote: normalized.quote || "",
+    strategic_priorities: normalized.strategicPriorities || "",
+  };
+
   return {
-    region: briefing.region || "EMEA",
-    product_name: briefing.product_name || "[Product Name]",
-    launch_date: briefing.launch_date || "[Launch Date]",
-    key_messages: briefing.key_messages
-      ? parseListValue(briefing.key_messages)
+    region: structuredBriefing.region,
+    product_name: structuredBriefing.product_name,
+    launch_date: structuredBriefing.launch_date,
+    features: structuredBriefing.features,
+    key_messages: normalized.keyMessages
+      ? parseListValue(normalized.keyMessages)
       : [],
-    features: briefing.features.length > 0 ? briefing.features : [],
+    quote: structuredBriefing.quote,
+    strategic_priorities: structuredBriefing.strategic_priorities,
+    new_product: structuredBriefing,
+    event_exhibition: structuredBriefing,
+    case_study_success_story: structuredBriefing,
+    article_questionnaire: structuredBriefing,
   };
 }
 
@@ -147,8 +294,9 @@ export function buildRelevanceMessageContent(formData: Record<string, string>): 
   return `Please generate a press release based on this data:\n${JSON.stringify(briefing, null, 2)}\n\n${flatBlock}`;
 }
 
-export function buildRelevanceTriggerPayload(formData: Record<string, string>) {
-  const briefing = buildBriefingData(formData);
+export function buildRelevanceTriggerPayload(body: unknown) {
+  const normalized = normalizeIncomingBody(body);
+  const formData = normalizedToFormData(normalized);
 
   return {
     agent_id: resolveAgentId(),
@@ -156,7 +304,7 @@ export function buildRelevanceTriggerPayload(formData: Record<string, string>) {
       role: "user" as const,
       content: buildRelevanceMessageContent(formData),
     },
-    params: buildAgentParams(briefing),
+    params: buildAgentParams(normalized),
   };
 }
 
@@ -332,11 +480,15 @@ async function fetchConversationMessages(
   return (await response.json()) as Record<string, unknown>;
 }
 
+type PollConversationResult =
+  | { kind: "draft"; draftText: string; raw: Record<string, unknown> }
+  | { kind: "diagnostic"; error: string; raw: Record<string, unknown> };
+
 async function pollConversationForDraft(
   apiKey: string,
   conversationId: string,
   triggerData: Record<string, unknown>
-): Promise<{ draftText: string; raw: Record<string, unknown> } | null> {
+): Promise<PollConversationResult | null> {
   let lastSnapshot: Record<string, unknown> = triggerData;
 
   for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
@@ -366,13 +518,22 @@ async function pollConversationForDraft(
 
     const messages = getMessagesArray(messagesPayload);
     const draftFromHistory = extractLatestAgentDraft(messages);
+
     if (draftFromHistory) {
-      return { draftText: draftFromHistory, raw: lastSnapshot };
+      if (isAgentDiagnosticError(draftFromHistory)) {
+        console.warn("[Relevance poll] Agent diagnostic error detected:", draftFromHistory);
+        return { kind: "diagnostic", error: draftFromHistory, raw: lastSnapshot };
+      }
+      return { kind: "draft", draftText: draftFromHistory, raw: lastSnapshot };
     }
 
     const draftFromPayload = safeExtractDraftText(messagesPayload);
     if (draftFromPayload) {
-      return { draftText: draftFromPayload, raw: lastSnapshot };
+      if (isAgentDiagnosticError(draftFromPayload)) {
+        console.warn("[Relevance poll] Agent diagnostic error in payload:", draftFromPayload);
+        return { kind: "diagnostic", error: draftFromPayload, raw: lastSnapshot };
+      }
+      return { kind: "draft", draftText: draftFromPayload, raw: lastSnapshot };
     }
   }
 
@@ -393,6 +554,7 @@ export type RelevanceGenerateResult =
   | {
       success: false;
       error: string;
+      status?: number;
       debugPayload?: string;
       jobId?: string;
       raw?: Record<string, unknown>;
@@ -410,14 +572,14 @@ export function formatRelevanceApiError(err: unknown): {
 }
 
 export async function callRelevanceAgent(
-  formData: Record<string, string>
+  body: unknown
 ): Promise<RelevanceGenerateResult> {
   const apiKey = readRelevanceEnv("RELEVANCE_AI_API_KEY");
   if (!apiKey) {
     throw new Error("RELEVANCE_AI_API_KEY is not configured.");
   }
 
-  const relevancePayload = buildRelevanceTriggerPayload(formData);
+  const relevancePayload = buildRelevanceTriggerPayload(body);
 
   console.log(
     "Sending dual payload to Relevance:",
@@ -464,6 +626,16 @@ export async function callRelevanceAgent(
   let draftText: string | null = null;
   try {
     draftText = safeExtractDraftText(data);
+    if (draftText && isAgentDiagnosticError(draftText)) {
+      return {
+        success: false,
+        error: draftText,
+        status: 400,
+        debugPayload: JSON.stringify(data),
+        jobId,
+        raw: data,
+      };
+    }
   } catch (err) {
     console.warn("[Relevance] Path mapping guard caught:", err);
     draftText = null;
@@ -476,7 +648,17 @@ export async function callRelevanceAgent(
         `[Relevance] Queued response (state: ${asNonEmptyString(data.state) ?? "unknown"}). Polling conversation ${conversationId}…`
       );
       const polled = await pollConversationForDraft(apiKey, conversationId, data);
-      if (polled) {
+      if (polled?.kind === "diagnostic") {
+        return {
+          success: false,
+          error: polled.error,
+          status: 400,
+          debugPayload: JSON.stringify(polled.raw),
+          jobId,
+          raw: polled.raw,
+        };
+      }
+      if (polled?.kind === "draft") {
         return {
           success: true,
           draftText: polled.draftText,

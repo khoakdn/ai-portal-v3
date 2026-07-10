@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     const result = await callRelevanceAgent(body);
 
     if (!result.success) {
-      console.warn("[/api/relevance/press-release] Empty or unmapped response:", result.error);
+      console.warn("[/api/relevance/press-release] Agent response issue:", result.error);
       return NextResponse.json(
         {
           success: false,
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
           debugPayload: result.debugPayload,
           jobId: result.jobId,
         },
-        { status: 200, headers: NO_CACHE_HEADERS }
+        { status: result.status ?? 200, headers: NO_CACHE_HEADERS }
       );
     }
 
