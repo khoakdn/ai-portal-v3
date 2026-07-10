@@ -3,8 +3,8 @@ export const RELEVANCE_ENDPOINT =
 
 export const RELEVANCE_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
-const POLL_MAX_ATTEMPTS = 12;
-const POLL_INTERVAL_MS = 4000;
+const POLL_INTERVAL_MS = 3000;
+const POLL_BUDGET_MS = 55_000;
 
 const QUEUED_STATES = new Set([
   "waiting-for-capacity",
@@ -661,20 +661,25 @@ async function pollConversationForDraft(
   triggerData: Record<string, unknown>
 ): Promise<PollConversationResult | null> {
   let lastSnapshot: Record<string, unknown> = triggerData;
+  const deadline = Date.now() + POLL_BUDGET_MS;
+  let attempt = 0;
 
-  for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+  while (Date.now() < deadline) {
+    attempt += 1;
+
     if (attempt > 1) {
       await sleep(POLL_INTERVAL_MS);
+      if (Date.now() >= deadline) break;
     }
 
     console.info(
-      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} — messages, task/view, studios for ${conversationId}`
+      `[Relevance poll] Attempt ${attempt} — messages, task/view, studios for ${conversationId}`
     );
 
     const polled = await pollOnceForDraft(apiKey, agentId, conversationId);
     lastSnapshot = { trigger: triggerData, ...polled.snapshot };
     console.log(
-      `=== RELEVANCE POLL SNAPSHOT (${attempt}/${POLL_MAX_ATTEMPTS}) ===`,
+      `=== RELEVANCE POLL SNAPSHOT (${attempt}) ===`,
       JSON.stringify(lastSnapshot, null, 2)
     );
 
@@ -689,7 +694,7 @@ async function pollConversationForDraft(
   }
 
   console.warn(
-    `[Relevance poll] Exhausted ${POLL_MAX_ATTEMPTS} attempts for conversation ${conversationId}`
+    `[Relevance poll] Exhausted ${attempt} attempts (${POLL_BUDGET_MS}ms budget) for conversation ${conversationId}`
   );
   return null;
 }
