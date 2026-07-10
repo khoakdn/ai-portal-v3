@@ -34,8 +34,15 @@ export function resolveAgentId(): string {
 
 function getRelevanceBaseUrl(): string {
   const fromEnv = readRelevanceEnv("RELEVANCE_AI_REGION_BASE_URL");
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return "https://api-d7b62b.stack.tryrelevance.com/latest";
+  let base =
+    fromEnv ||
+    RELEVANCE_ENDPOINT.replace(/\/agents\/trigger\/?$/, "") ||
+    "https://api-d7b62b.stack.tryrelevance.com/latest";
+
+  base = base.replace(/\/$/, "");
+  // Guard against env values that accidentally include the trigger path.
+  base = base.replace(/\/agents\/trigger$/, "");
+  return base;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -822,7 +829,7 @@ export async function callRelevanceAgent(
   if (!draftText) {
     const state = asNonEmptyString(data.state);
     const queuedHint = state && QUEUED_STATES.has(state)
-      ? ` Agent state: ${state}. The job may still be queued — try again shortly.`
+      ? ` Agent state: ${state}. The job may still be queued - try again shortly.`
       : "";
 
     return {
