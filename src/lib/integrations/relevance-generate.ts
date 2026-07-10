@@ -3,8 +3,8 @@ export const RELEVANCE_ENDPOINT =
 
 export const RELEVANCE_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
-const POLL_MAX_ATTEMPTS = 6;
-const POLL_INTERVAL_MS = 3000;
+const POLL_MAX_ATTEMPTS = 12;
+const POLL_INTERVAL_MS = 4000;
 
 const QUEUED_STATES = new Set([
   "waiting-for-capacity",
@@ -448,17 +448,15 @@ function shouldPollForDraft(
   return Boolean(asRecord(data.job_info));
 }
 
-async function fetchConversationMessages(
+async function relevanceFetch(
   apiKey: string,
-  conversationId: string
+  url: string,
+  method: "GET" | "POST" = "GET"
 ): Promise<Record<string, unknown>> {
-  const baseUrl = getRelevanceBaseUrl();
-  const url = `${baseUrl}/agents/conversations/${conversationId}/messages`;
-
   let response: Response;
   try {
     response = await fetch(url, {
-      method: "GET",
+      method,
       headers: {
         "Content-Type": "application/json",
         Authorization: apiKey,
@@ -467,17 +465,182 @@ async function fetchConversationMessages(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Network request failed";
-    throw new Error(`Conversation poll failed: ${message}`);
+    throw new Error(`Relevance request failed: ${message}`);
   }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
-      `Conversation poll returned ${response.status}. ${errorText}`.trim()
+      `Relevance request returned ${response.status}. ${errorText}`.trim()
     );
   }
 
   return (await response.json()) as Record<string, unknown>;
+}
+
+async function fetchConversationMessages(
+  apiKey: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  const baseUrl = getRelevanceBaseUrl();
+  const url = `${baseUrl}/agents/conversations/${conversationId}/messages`;
+  return relevanceFetch(apiKey, url, "GET");
+}
+
+async function fetchAgentTaskView(
+  apiKey: string,
+  agentId: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  const baseUrl = getRelevanceBaseUrl();
+  const url = `${baseUrl}/agents/${agentId}/tasks/${conversationId}/view`;
+  return relevanceFetch(apiKey, url, "POST");
+}
+
+async function fetchConversationStudios(
+  apiKey: string,
+  agentId: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  const baseUrl = getRelevanceBaseUrl();
+  const params = new URLSearchParams({
+    conversation_id: conversationId,
+    agent_id: agentId,
+    page_size: "100",
+  });
+  const url = `${baseUrl}/agents/conversations/studios/list?${params.toString()}`;
+  return relevanceFetch(apiKey, url, "GET");
+}
+
+function extractDraftFromTaskView(payload: Record<string, unknown>): string | null {
+  const results = getMessagesArray(payload);
+
+  for (let i = results.length - 1; i >= 0; i--) {
+    const step = asRecord(results[i]);
+    if (!step) continue;
+
+    const content = asRecord(step.content);
+    if (!content || content.generating === true) continue;
+
+    const contentType = asNonEmptyString(content.type);
+    if (contentType === "agent-message") {
+      const text = normalizeDraftValue(content.text);
+      if (text) return text;
+    }
+
+    if (contentType === "tool-run") {
+      const output = content.output;
+      if (typeof output === "string") {
+        const text = normalizeDraftValue(output);
+        if (text) return text;
+      }
+      const outputObj = asRecord(output);
+      if (outputObj) {
+        const draft =
+          safeExtractDraftText({ output: outputObj }) ||
+          normalizeDraftValue(outputObj.text) ||
+          normalizeDraftValue(outputObj.reply);
+        if (draft) return draft;
+      }
+    }
+
+    if (contentType === "agent-error" && Array.isArray(content.errors)) {
+      const messages = content.errors
+        .map((item) => {
+          const err = asRecord(item);
+          return asNonEmptyString(err?.message) || asNonEmptyString(err?.error);
+        })
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join("\n");
+    }
+
+    const fromStep = extractTextFromHistoryMessage(step);
+    if (fromStep) return fromStep;
+  }
+
+  return null;
+}
+
+function extractDraftFromStudiosList(payload: Record<string, unknown>): string | null {
+  const results = payload.results;
+  if (!Array.isArray(results)) return null;
+
+  for (let i = results.length - 1; i >= 0; i--) {
+    const item = asRecord(results[i]);
+    if (!item || item.status !== "complete") continue;
+
+    const preview =
+      normalizeDraftValue(item.output_preview) ||
+      safeExtractDraftText(item) ||
+      normalizeDraftValue(item.output);
+    if (preview) return preview;
+  }
+
+  return null;
+}
+
+function resolvePollDraft(text: string): PollConversationResult {
+  if (isAgentDiagnosticError(text)) {
+    return { kind: "diagnostic", error: text, raw: {} };
+  }
+  return { kind: "draft", draftText: text, raw: {} };
+}
+
+async function pollOnceForDraft(
+  apiKey: string,
+  agentId: string,
+  conversationId: string
+): Promise<{ draftText: string | null; snapshot: Record<string, unknown> }> {
+  const snapshot: Record<string, unknown> = {};
+
+  try {
+    const messagesPayload = await fetchConversationMessages(apiKey, conversationId);
+    snapshot.messages = messagesPayload;
+
+    const draftFromHistory = extractLatestAgentDraft(getMessagesArray(messagesPayload));
+    if (draftFromHistory) {
+      return { draftText: draftFromHistory, snapshot };
+    }
+
+    const draftFromPayload = safeExtractDraftText(messagesPayload);
+    if (draftFromPayload) {
+      return { draftText: draftFromPayload, snapshot };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Messages poll failed";
+    snapshot.messagesError = message;
+    console.warn(`[Relevance poll] Messages endpoint: ${message}`);
+  }
+
+  try {
+    const taskViewPayload = await fetchAgentTaskView(apiKey, agentId, conversationId);
+    snapshot.taskView = taskViewPayload;
+
+    const draftFromTaskView = extractDraftFromTaskView(taskViewPayload);
+    if (draftFromTaskView) {
+      return { draftText: draftFromTaskView, snapshot };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Task view poll failed";
+    snapshot.taskViewError = message;
+    console.warn(`[Relevance poll] Task view endpoint: ${message}`);
+  }
+
+  try {
+    const studiosPayload = await fetchConversationStudios(apiKey, agentId, conversationId);
+    snapshot.studios = studiosPayload;
+
+    const draftFromStudios = extractDraftFromStudiosList(studiosPayload);
+    if (draftFromStudios) {
+      return { draftText: draftFromStudios, snapshot };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Studios poll failed";
+    snapshot.studiosError = message;
+    console.warn(`[Relevance poll] Studios endpoint: ${message}`);
+  }
+
+  return { draftText: null, snapshot };
 }
 
 type PollConversationResult =
@@ -486,6 +649,7 @@ type PollConversationResult =
 
 async function pollConversationForDraft(
   apiKey: string,
+  agentId: string,
   conversationId: string,
   triggerData: Record<string, unknown>
 ): Promise<PollConversationResult | null> {
@@ -497,43 +661,23 @@ async function pollConversationForDraft(
     }
 
     console.info(
-      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} — GET conversations/${conversationId}/messages`
+      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} — messages, task/view, studios for ${conversationId}`
     );
 
-    let messagesPayload: Record<string, unknown>;
-    try {
-      messagesPayload = await fetchConversationMessages(apiKey, conversationId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Poll request failed";
-      console.warn(`[Relevance poll] Attempt ${attempt} error: ${message}`);
-      if (attempt === POLL_MAX_ATTEMPTS) return null;
-      continue;
-    }
-
-    lastSnapshot = { trigger: triggerData, messages: messagesPayload };
+    const polled = await pollOnceForDraft(apiKey, agentId, conversationId);
+    lastSnapshot = { trigger: triggerData, ...polled.snapshot };
     console.log(
       `=== RELEVANCE POLL SNAPSHOT (${attempt}/${POLL_MAX_ATTEMPTS}) ===`,
       JSON.stringify(lastSnapshot, null, 2)
     );
 
-    const messages = getMessagesArray(messagesPayload);
-    const draftFromHistory = extractLatestAgentDraft(messages);
-
-    if (draftFromHistory) {
-      if (isAgentDiagnosticError(draftFromHistory)) {
-        console.warn("[Relevance poll] Agent diagnostic error detected:", draftFromHistory);
-        return { kind: "diagnostic", error: draftFromHistory, raw: lastSnapshot };
+    if (polled.draftText) {
+      const resolved = resolvePollDraft(polled.draftText);
+      if (resolved.kind === "diagnostic") {
+        console.warn("[Relevance poll] Agent diagnostic error detected:", resolved.error);
+        return { kind: "diagnostic", error: resolved.error, raw: lastSnapshot };
       }
-      return { kind: "draft", draftText: draftFromHistory, raw: lastSnapshot };
-    }
-
-    const draftFromPayload = safeExtractDraftText(messagesPayload);
-    if (draftFromPayload) {
-      if (isAgentDiagnosticError(draftFromPayload)) {
-        console.warn("[Relevance poll] Agent diagnostic error in payload:", draftFromPayload);
-        return { kind: "diagnostic", error: draftFromPayload, raw: lastSnapshot };
-      }
-      return { kind: "draft", draftText: draftFromPayload, raw: lastSnapshot };
+      return { kind: "draft", draftText: resolved.draftText, raw: lastSnapshot };
     }
   }
 
@@ -647,7 +791,12 @@ export async function callRelevanceAgent(
       console.info(
         `[Relevance] Queued response (state: ${asNonEmptyString(data.state) ?? "unknown"}). Polling conversation ${conversationId}…`
       );
-      const polled = await pollConversationForDraft(apiKey, conversationId, data);
+      const polled = await pollConversationForDraft(
+        apiKey,
+        resolveAgentId(),
+        conversationId,
+        data
+      );
       if (polled?.kind === "diagnostic") {
         return {
           success: false,
@@ -671,9 +820,14 @@ export async function callRelevanceAgent(
   }
 
   if (!draftText) {
+    const state = asNonEmptyString(data.state);
+    const queuedHint = state && QUEUED_STATES.has(state)
+      ? ` Agent state: ${state}. The job may still be queued — try again shortly.`
+      : "";
+
     return {
       success: false,
-      error: "Empty draft received from AI agent",
+      error: `Empty draft received from AI agent.${queuedHint}`,
       debugPayload: JSON.stringify(data),
       jobId,
       raw: data,

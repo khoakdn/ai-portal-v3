@@ -199,7 +199,7 @@ export function ContentLifecyclePanel() {
             {isGenerating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating press release draft…
+                Generating press release draft (up to ~1 min)…
               </>
             ) : (
               <>
@@ -212,7 +212,10 @@ export function ContentLifecyclePanel() {
           {isGenerating && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <p>Generating your press release draft — this usually takes a few seconds.</p>
+              <p>
+                Generating your press release draft — the AI agent may take up to a minute while
+                capacity is allocated.
+              </p>
             </div>
           )}
 
