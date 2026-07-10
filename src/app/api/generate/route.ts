@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
+export const maxDuration = 60;
 
 import { NextResponse } from "next/server";
 import {
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
     }
 
     console.info(
-      `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}`
+      `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}${result.polled ? " (polled)" : ""}`
     );
 
     return NextResponse.json(

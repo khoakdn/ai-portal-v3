@@ -3,6 +3,17 @@ export const RELEVANCE_ENDPOINT =
 
 export const RELEVANCE_AGENT_ID = "7d952fd2-b498-45f4-83e0-97984ef1eab7";
 
+const POLL_MAX_ATTEMPTS = 6;
+const POLL_INTERVAL_MS = 3000;
+
+const QUEUED_STATES = new Set([
+  "waiting-for-capacity",
+  "starting-up",
+  "queued-for-approval",
+  "queued-for-rerun",
+  "running",
+]);
+
 /** Strip optional surrounding quotes from env values. */
 export function readRelevanceEnv(key: string): string {
   const raw = process.env[key];
@@ -19,6 +30,16 @@ export function readRelevanceEnv(key: string): string {
 
 export function resolveAgentId(): string {
   return readRelevanceEnv("RELEVANCE_AI_AGENT_ID") || RELEVANCE_AGENT_ID;
+}
+
+function getRelevanceBaseUrl(): string {
+  const fromEnv = readRelevanceEnv("RELEVANCE_AI_REGION_BASE_URL");
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  return "https://api-d7b62b.stack.tryrelevance.com/latest";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const CLOSING_INSTRUCTION =
@@ -207,12 +228,167 @@ export function safeExtractDraftText(data: Record<string, unknown>): string | nu
   }
 }
 
+export function extractConversationId(data: Record<string, unknown>): string | null {
+  return (
+    asNonEmptyString(data.conversation_id) ??
+    asNonEmptyString(asRecord(data.job_info)?.conversation_id)
+  );
+}
+
+function isAgentRole(role: string | undefined | null): boolean {
+  if (!role) return false;
+  const normalized = role.toLowerCase();
+  return normalized === "agent" || normalized === "assistant";
+}
+
+function getMessagesArray(payload: Record<string, unknown>): unknown[] {
+  if (Array.isArray(payload.messages)) return payload.messages;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+function extractTextFromHistoryMessage(msg: Record<string, unknown>): string | null {
+  const role = asNonEmptyString(msg.role);
+  const content = msg.content;
+  const contentObj = asRecord(content);
+
+  const isAgent =
+    isAgentRole(role) ||
+    contentObj?.type === "agent-message" ||
+    contentObj?.type === "agent";
+
+  if (!isAgent) return null;
+
+  if (contentObj?.generating === true) return null;
+
+  return (
+    normalizeDraftValue(msg.text) ||
+    normalizeDraftValue(msg.content) ||
+    normalizeDraftValue(contentObj?.text) ||
+    normalizeDraftValue(contentObj?.output) ||
+    normalizeDraftValue(contentObj?.reply)
+  );
+}
+
+/** Find the latest agent/assistant message in a conversation history payload. */
+export function extractLatestAgentDraft(messages: unknown[]): string | null {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = asRecord(messages[i]);
+    if (!msg) continue;
+    const text = extractTextFromHistoryMessage(msg);
+    if (text) return text;
+  }
+
+  return null;
+}
+
+function shouldPollForDraft(
+  data: Record<string, unknown>,
+  draftText: string | null
+): boolean {
+  if (draftText) return false;
+
+  const conversationId = extractConversationId(data);
+  if (!conversationId) return false;
+
+  const state = asNonEmptyString(data.state);
+  if (state && QUEUED_STATES.has(state)) return true;
+
+  return Boolean(asRecord(data.job_info));
+}
+
+async function fetchConversationMessages(
+  apiKey: string,
+  conversationId: string
+): Promise<Record<string, unknown>> {
+  const baseUrl = getRelevanceBaseUrl();
+  const url = `${baseUrl}/agents/conversations/${conversationId}/messages`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: apiKey,
+      },
+      cache: "no-store",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Network request failed";
+    throw new Error(`Conversation poll failed: ${message}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Conversation poll returned ${response.status}. ${errorText}`.trim()
+    );
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
+
+async function pollConversationForDraft(
+  apiKey: string,
+  conversationId: string,
+  triggerData: Record<string, unknown>
+): Promise<{ draftText: string; raw: Record<string, unknown> } | null> {
+  let lastSnapshot: Record<string, unknown> = triggerData;
+
+  for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      await sleep(POLL_INTERVAL_MS);
+    }
+
+    console.info(
+      `[Relevance poll] Attempt ${attempt}/${POLL_MAX_ATTEMPTS} — GET conversations/${conversationId}/messages`
+    );
+
+    let messagesPayload: Record<string, unknown>;
+    try {
+      messagesPayload = await fetchConversationMessages(apiKey, conversationId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Poll request failed";
+      console.warn(`[Relevance poll] Attempt ${attempt} error: ${message}`);
+      if (attempt === POLL_MAX_ATTEMPTS) return null;
+      continue;
+    }
+
+    lastSnapshot = { trigger: triggerData, messages: messagesPayload };
+    console.log(
+      `=== RELEVANCE POLL SNAPSHOT (${attempt}/${POLL_MAX_ATTEMPTS}) ===`,
+      JSON.stringify(lastSnapshot, null, 2)
+    );
+
+    const messages = getMessagesArray(messagesPayload);
+    const draftFromHistory = extractLatestAgentDraft(messages);
+    if (draftFromHistory) {
+      return { draftText: draftFromHistory, raw: lastSnapshot };
+    }
+
+    const draftFromPayload = safeExtractDraftText(messagesPayload);
+    if (draftFromPayload) {
+      return { draftText: draftFromPayload, raw: lastSnapshot };
+    }
+  }
+
+  console.warn(
+    `[Relevance poll] Exhausted ${POLL_MAX_ATTEMPTS} attempts for conversation ${conversationId}`
+  );
+  return null;
+}
+
 export type RelevanceGenerateResult =
   | {
       success: true;
       draftText: string;
       jobId: string;
       raw: Record<string, unknown>;
+      polled?: boolean;
     }
   | {
       success: false;
@@ -280,7 +456,7 @@ export async function callRelevanceAgent(
   console.log("=== RAW RELEVANCE AI RESPONSE ===", JSON.stringify(data, null, 2));
 
   const jobId: string =
-    asNonEmptyString(data.conversation_id) ??
+    extractConversationId(data) ??
     asNonEmptyString(asRecord(data.job_info)?.job_id) ??
     asNonEmptyString(data.id) ??
     "triggered";
@@ -293,6 +469,25 @@ export async function callRelevanceAgent(
     draftText = null;
   }
 
+  if (!draftText && shouldPollForDraft(data, draftText)) {
+    const conversationId = extractConversationId(data);
+    if (conversationId) {
+      console.info(
+        `[Relevance] Queued response (state: ${asNonEmptyString(data.state) ?? "unknown"}). Polling conversation ${conversationId}…`
+      );
+      const polled = await pollConversationForDraft(apiKey, conversationId, data);
+      if (polled) {
+        return {
+          success: true,
+          draftText: polled.draftText,
+          jobId,
+          raw: polled.raw,
+          polled: true,
+        };
+      }
+    }
+  }
+
   if (!draftText) {
     return {
       success: false,
@@ -303,5 +498,5 @@ export async function callRelevanceAgent(
     };
   }
 
-  return { success: true, draftText, jobId, raw: data };
+  return { success: true, draftText, jobId, raw: data, polled: false };
 }
