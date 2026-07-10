@@ -17,14 +17,8 @@ export function readRelevanceEnv(key: string): string {
   return trimmed;
 }
 
-const OUTPUT_GUARDRAILS =
-  "Please draft the Delta Electronics press release following the strict style guidelines and structural constraints.";
-
-type BriefingKey =
-  | "new_product"
-  | "event_exhibition"
-  | "case_study_success_story"
-  | "article_questionnaire";
+const CLOSING_INSTRUCTION =
+  "Please map these values directly to your internal variable configurations and generate the Delta Electronics press release draft.";
 
 interface BriefingData {
   region: string;
@@ -56,28 +50,6 @@ function resolvePrType(formData: Record<string, string>): string {
   return "product_launch";
 }
 
-function resolveBriefingKey(prType: string): BriefingKey {
-  const normalized = prType.toLowerCase().replace(/\s+/g, "_");
-
-  switch (normalized) {
-    case "product_launch":
-      return "new_product";
-    case "event":
-    case "event_announcement":
-    case "event_exhibition":
-      return "event_exhibition";
-    case "case_study":
-    case "case_study_success_story":
-      return "case_study_success_story";
-    case "article":
-    case "article_questionnaire":
-    case "general":
-      return "article_questionnaire";
-    default:
-      return "new_product";
-  }
-}
-
 function buildBriefingData(formData: Record<string, string>): BriefingData {
   const featuresSource =
     formData.features ||
@@ -103,20 +75,25 @@ function buildBriefingData(formData: Record<string, string>): BriefingData {
   };
 }
 
-/** Build Relevance message content with the authorized briefing JSON block. */
+/** Build flat, LLM-friendly briefing text for Relevance message.content. */
 export function buildRelevanceMessageContent(formData: Record<string, string>): string {
   const prType = resolvePrType(formData);
-  const matchingKey = resolveBriefingKey(prType);
-  const briefingData = buildBriefingData(formData);
+  const briefing = buildBriefingData(formData);
+  const featuresList =
+    briefing.features.length > 0 ? briefing.features.join(", ") : "Not specified";
 
-  return `PR Type: ${prType}
-
-Here is the official authorized briefing JSON object:
-\`\`\`json
-${JSON.stringify({ [matchingKey]: briefingData }, null, 2)}
-\`\`\`
-
-${OUTPUT_GUARDRAILS}`;
+  return `PR_TYPE: ${prType}
+---
+BRIEFING_DATA:
+Region: ${briefing.region || "Not specified"}
+Product Name: ${briefing.product_name || "Not specified"}
+Launch Date: ${briefing.launch_date || "Not specified"}
+Features: ${featuresList}
+Key Messages: ${briefing.key_messages || "Not specified"}
+Manager Quote: ${briefing.quote || "Not specified"}
+Strategic Priorities: ${briefing.strategic_priorities || "Not specified"}
+---
+${CLOSING_INSTRUCTION}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Briefing JSON is assembled in buildRelevanceMessageContent from prType + form fields.
+    // Flat briefing text assembled in buildRelevanceMessageContent (prType + form fields).
     const { draftText, jobId } = await callRelevanceAgent(body);
 
     console.info(
