@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import {
   callRelevanceAgent,
   formatRelevanceApiError,
-  RELEVANCE_AGENT_ID,
+  resolveAgentId,
 } from "@/lib/integrations/relevance-generate";
 
 const NO_CACHE_HEADERS = {
@@ -24,15 +24,27 @@ export async function POST(req: Request) {
       );
     }
 
-    // Flat briefing text assembled in buildRelevanceMessageContent (prType + form fields).
-    const { draftText, jobId } = await callRelevanceAgent(body);
+    const result = await callRelevanceAgent(body);
+
+    if (!result.success) {
+      console.warn("[/api/generate] Empty or unmapped agent response:", result.error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.error,
+          debugPayload: result.debugPayload,
+          jobId: result.jobId,
+        },
+        { status: 200, headers: NO_CACHE_HEADERS }
+      );
+    }
 
     console.info(
-      `[/api/generate] Agent ${RELEVANCE_AGENT_ID} completed. Job: ${jobId}. Draft length: ${draftText.length}`
+      `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}`
     );
 
     return NextResponse.json(
-      { success: true, draftText, jobId },
+      { success: true, draftText: result.draftText, jobId: result.jobId },
       { headers: NO_CACHE_HEADERS }
     );
   } catch (err) {

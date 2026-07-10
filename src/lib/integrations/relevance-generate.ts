@@ -17,10 +17,14 @@ export function readRelevanceEnv(key: string): string {
   return trimmed;
 }
 
+export function resolveAgentId(): string {
+  return readRelevanceEnv("RELEVANCE_AI_AGENT_ID") || RELEVANCE_AGENT_ID;
+}
+
 const CLOSING_INSTRUCTION =
   "Please map these values directly to your internal variable configurations and generate the Delta Electronics press release draft.";
 
-interface BriefingData {
+export interface BriefingData {
   region: string;
   product_name: string;
   launch_date: string;
@@ -30,7 +34,15 @@ interface BriefingData {
   strategic_priorities: string;
 }
 
-function parseFeaturesArray(value: string | undefined): string[] {
+export interface RelevanceAgentParams {
+  region: string;
+  product_name: string;
+  launch_date: string;
+  key_messages: string[];
+  features: string[];
+}
+
+function parseListValue(value: string | undefined): string[] {
   if (!value?.trim()) return [];
   return value
     .split(/[\n,;|]+/)
@@ -50,7 +62,7 @@ function resolvePrType(formData: Record<string, string>): string {
   return "product_launch";
 }
 
-function buildBriefingData(formData: Record<string, string>): BriefingData {
+export function buildBriefingData(formData: Record<string, string>): BriefingData {
   const featuresSource =
     formData.features ||
     formData.productsToAddress ||
@@ -61,7 +73,7 @@ function buildBriefingData(formData: Record<string, string>): BriefingData {
     region: formData.region?.trim() || "",
     product_name: formData.productName?.trim() || formData.title?.trim() || "",
     launch_date: formData.launchDate?.trim() || formData.deadline?.trim() || "",
-    features: parseFeaturesArray(featuresSource),
+    features: parseListValue(featuresSource),
     key_messages:
       formData.keyMessages?.trim() ||
       formData.thematicFocus?.trim() ||
@@ -75,10 +87,19 @@ function buildBriefingData(formData: Record<string, string>): BriefingData {
   };
 }
 
-/** Build flat, LLM-friendly briefing text for Relevance message.content. */
-export function buildRelevanceMessageContent(formData: Record<string, string>): string {
-  const prType = resolvePrType(formData);
-  const briefing = buildBriefingData(formData);
+export function buildAgentParams(briefing: BriefingData): RelevanceAgentParams {
+  return {
+    region: briefing.region || "EMEA",
+    product_name: briefing.product_name || "[Product Name]",
+    launch_date: briefing.launch_date || "[Launch Date]",
+    key_messages: briefing.key_messages
+      ? parseListValue(briefing.key_messages)
+      : [],
+    features: briefing.features.length > 0 ? briefing.features : [],
+  };
+}
+
+function buildFlatBriefingBlock(prType: string, briefing: BriefingData): string {
   const featuresList =
     briefing.features.length > 0 ? briefing.features.join(", ") : "Not specified";
 
@@ -94,6 +115,28 @@ Manager Quote: ${briefing.quote || "Not specified"}
 Strategic Priorities: ${briefing.strategic_priorities || "Not specified"}
 ---
 ${CLOSING_INSTRUCTION}`;
+}
+
+/** Dual-format message: JSON briefing + flat markdown block for the agent stream. */
+export function buildRelevanceMessageContent(formData: Record<string, string>): string {
+  const prType = resolvePrType(formData);
+  const briefing = buildBriefingData(formData);
+  const flatBlock = buildFlatBriefingBlock(prType, briefing);
+
+  return `Please generate a press release based on this data:\n${JSON.stringify(briefing, null, 2)}\n\n${flatBlock}`;
+}
+
+export function buildRelevanceTriggerPayload(formData: Record<string, string>) {
+  const briefing = buildBriefingData(formData);
+
+  return {
+    agent_id: resolveAgentId(),
+    message: {
+      role: "user" as const,
+      content: buildRelevanceMessageContent(formData),
+    },
+    params: buildAgentParams(briefing),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -136,7 +179,7 @@ function normalizeDraftValue(value: unknown): string | null {
 
 /**
  * Extract press release markdown/text from a direct Relevance trigger payload.
- * Single-shot responses only — no chat history or polling paths.
+ * Returns null when expected keys are missing or empty.
  */
 export function extractDraftText(data: Record<string, unknown>): string | null {
   const output = data.output;
@@ -153,42 +196,41 @@ export function extractDraftText(data: Record<string, unknown>): string | null {
   return draftText;
 }
 
-export class RelevancePathMappingError extends Error {
-  readonly debugPayload: string;
-
-  constructor(data: Record<string, unknown>) {
-    super("Agent completed but path mapping failed.");
-    this.name = "RelevancePathMappingError";
-    this.debugPayload = JSON.stringify(data);
+/** Safe wrapper — never throws during path mapping. */
+export function safeExtractDraftText(data: Record<string, unknown>): string | null {
+  try {
+    if (!data || typeof data !== "object") return null;
+    return extractDraftText(data);
+  } catch (err) {
+    console.warn("[Relevance] Draft extraction failed:", err);
+    return null;
   }
 }
 
+export type RelevanceGenerateResult =
+  | {
+      success: true;
+      draftText: string;
+      jobId: string;
+      raw: Record<string, unknown>;
+    }
+  | {
+      success: false;
+      error: string;
+      debugPayload?: string;
+      jobId?: string;
+      raw?: Record<string, unknown>;
+    };
+
 export function formatRelevanceApiError(err: unknown): {
   status: number;
-  body: { success: false; error: string; debugPayload?: string };
+  body: { success: false; error: string };
 } {
-  if (err instanceof RelevancePathMappingError) {
-    return {
-      status: 500,
-      body: {
-        success: false,
-        error: err.message,
-        debugPayload: err.debugPayload,
-      },
-    };
-  }
-
   const message = err instanceof Error ? err.message : "Unknown error";
   return {
     status: 500,
     body: { success: false, error: `Live AI call failed: ${message}` },
   };
-}
-
-export interface RelevanceGenerateResult {
-  draftText: string;
-  jobId: string;
-  raw: Record<string, unknown>;
 }
 
 export async function callRelevanceAgent(
@@ -199,16 +241,10 @@ export async function callRelevanceAgent(
     throw new Error("RELEVANCE_AI_API_KEY is not configured.");
   }
 
-  const relevancePayload = {
-    message: {
-      role: "user" as const,
-      content: buildRelevanceMessageContent(formData),
-    },
-    agent_id: RELEVANCE_AGENT_ID,
-  };
+  const relevancePayload = buildRelevanceTriggerPayload(formData);
 
   console.log(
-    "Sending clean payload to Relevance:",
+    "Sending dual payload to Relevance:",
     JSON.stringify(relevancePayload, null, 2)
   );
 
@@ -243,16 +279,29 @@ export async function callRelevanceAgent(
 
   console.log("=== RAW RELEVANCE AI RESPONSE ===", JSON.stringify(data, null, 2));
 
-  const draftText = extractDraftText(data);
-  if (!draftText) {
-    throw new RelevancePathMappingError(data);
-  }
-
   const jobId: string =
     asNonEmptyString(data.conversation_id) ??
     asNonEmptyString(asRecord(data.job_info)?.job_id) ??
     asNonEmptyString(data.id) ??
     "triggered";
 
-  return { draftText, jobId, raw: data };
+  let draftText: string | null = null;
+  try {
+    draftText = safeExtractDraftText(data);
+  } catch (err) {
+    console.warn("[Relevance] Path mapping guard caught:", err);
+    draftText = null;
+  }
+
+  if (!draftText) {
+    return {
+      success: false,
+      error: "Empty draft received from AI agent",
+      debugPayload: JSON.stringify(data),
+      jobId,
+      raw: data,
+    };
+  }
+
+  return { success: true, draftText, jobId, raw: data };
 }
