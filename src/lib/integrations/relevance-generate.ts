@@ -709,6 +709,15 @@ export type RelevanceGenerateResult =
     }
   | {
       success: false;
+      pending: true;
+      jobId: string;
+      message: string;
+      state?: string;
+      raw?: Record<string, unknown>;
+    }
+  | {
+      success: false;
+      pending?: false;
       error: string;
       status?: number;
       debugPayload?: string;
@@ -716,18 +725,143 @@ export type RelevanceGenerateResult =
       raw?: Record<string, unknown>;
     };
 
-export function formatRelevanceApiError(err: unknown): {
-  status: number;
-  body: { success: false; error: string };
-} {
-  const message = err instanceof Error ? err.message : "Unknown error";
+const TERMINAL_FAILURE_STATES = new Set(["failed", "error", "cancelled"]);
+
+function extractFailureFromSnapshot(snapshot: Record<string, unknown>): string | null {
+  const studios = asRecord(snapshot.studios);
+  const studioResults = studios?.results;
+  if (Array.isArray(studioResults)) {
+    for (let i = studioResults.length - 1; i >= 0; i--) {
+      const row = asRecord(studioResults[i]);
+      if (!row) continue;
+
+      const status = asNonEmptyString(row.status);
+      if (status !== "failed" && status !== "error") continue;
+
+      if (Array.isArray(row.errors) && row.errors.length > 0) {
+        const messages = row.errors
+          .map((item) => {
+            const err = asRecord(item);
+            return asNonEmptyString(err?.message) || asNonEmptyString(err?.error);
+          })
+          .filter(Boolean);
+        if (messages.length > 0) return messages.join("\n");
+      }
+
+      return `AI agent job failed (status: ${status}).`;
+    }
+  }
+
+  const taskView = asRecord(snapshot.taskView);
+  if (taskView) {
+    const taskResults = getMessagesArray(taskView);
+    for (let i = taskResults.length - 1; i >= 0; i--) {
+      const step = asRecord(taskResults[i]);
+      const content = asRecord(step?.content);
+      if (!content || content.type !== "agent-error" || !Array.isArray(content.errors)) {
+        continue;
+      }
+
+      const messages = content.errors
+        .map((item) => {
+          const err = asRecord(item);
+          return asNonEmptyString(err?.message) || asNonEmptyString(err?.error);
+        })
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join("\n");
+    }
+  }
+
+  return null;
+}
+
+function inferAgentStateFromSnapshot(
+  snapshot: Record<string, unknown>
+): string | undefined {
+  const studios = asRecord(snapshot.studios);
+  const results = studios?.results;
+  if (Array.isArray(results) && results.length > 0) {
+    const main = asRecord(results[0]);
+    const status = asNonEmptyString(main?.status);
+    if (status) return status;
+  }
+
+  const trigger = asRecord(snapshot.trigger);
+  return asNonEmptyString(trigger?.state) ?? undefined;
+}
+
+function pendingMessage(state?: string): string {
+  if (state === "waiting-for-capacity") {
+    return "Waiting for AI agent capacity...";
+  }
+  if (state === "inprogress" || state === "running") {
+    return "AI agent is researching and writing your draft...";
+  }
+  if (state === "complete") {
+    return "Finalizing press release draft...";
+  }
+  if (state === "failed" || state === "error" || state === "cancelled") {
+    return "AI agent could not complete this request.";
+  }
+  return "AI agent is processing your press release...";
+}
+
+export async function checkRelevanceJobStatus(
+  conversationId: string
+): Promise<RelevanceGenerateResult> {
+  const apiKey = readRelevanceEnv("RELEVANCE_AI_API_KEY");
+  if (!apiKey) {
+    throw new Error("RELEVANCE_AI_API_KEY is not configured.");
+  }
+
+  const polled = await pollOnceForDraft(apiKey, resolveAgentId(), conversationId);
+  const snapshot = polled.snapshot;
+  const state = inferAgentStateFromSnapshot(snapshot);
+  const failureMessage = extractFailureFromSnapshot(snapshot);
+
+  if (polled.draftText) {
+    const resolved = resolvePollDraft(polled.draftText);
+    if (resolved.kind === "diagnostic") {
+      return {
+        success: false,
+        error: resolved.error,
+        status: 400,
+        debugPayload: JSON.stringify(snapshot),
+        jobId: conversationId,
+        raw: snapshot,
+      };
+    }
+
+    return {
+      success: true,
+      draftText: resolved.draftText,
+      jobId: conversationId,
+      raw: snapshot,
+      polled: true,
+    };
+  }
+
+  if (failureMessage || (state && TERMINAL_FAILURE_STATES.has(state))) {
+    return {
+      success: false,
+      error: failureMessage ?? `AI agent job failed (state: ${state}).`,
+      debugPayload: JSON.stringify(snapshot),
+      jobId: conversationId,
+      raw: snapshot,
+    };
+  }
+
   return {
-    status: 500,
-    body: { success: false, error: `Live AI call failed: ${message}` },
+    success: false,
+    pending: true,
+    jobId: conversationId,
+    state,
+    message: pendingMessage(state),
+    raw: snapshot,
   };
 }
 
-export async function callRelevanceAgent(
+export async function triggerRelevanceAgent(
   body: unknown
 ): Promise<RelevanceGenerateResult> {
   const apiKey = readRelevanceEnv("RELEVANCE_AI_API_KEY");
@@ -800,41 +934,25 @@ export async function callRelevanceAgent(
   if (!draftText && shouldPollForDraft(data, draftText)) {
     const conversationId = extractConversationId(data);
     if (conversationId) {
+      const state = asNonEmptyString(data.state) ?? undefined;
       console.info(
-        `[Relevance] Queued response (state: ${asNonEmptyString(data.state) ?? "unknown"}). Polling conversation ${conversationId}…`
+        `[Relevance] Queued response (state: ${state ?? "unknown"}). Returning job ${conversationId} for client polling.`
       );
-      const polled = await pollConversationForDraft(
-        apiKey,
-        resolveAgentId(),
-        conversationId,
-        data
-      );
-      if (polled?.kind === "diagnostic") {
-        return {
-          success: false,
-          error: polled.error,
-          status: 400,
-          debugPayload: JSON.stringify(polled.raw),
-          jobId,
-          raw: polled.raw,
-        };
-      }
-      if (polled?.kind === "draft") {
-        return {
-          success: true,
-          draftText: polled.draftText,
-          jobId,
-          raw: polled.raw,
-          polled: true,
-        };
-      }
+      return {
+        success: false,
+        pending: true,
+        jobId: conversationId,
+        state,
+        message: pendingMessage(state),
+        raw: data,
+      };
     }
   }
 
   if (!draftText) {
     const state = asNonEmptyString(data.state);
     const queuedHint = state && QUEUED_STATES.has(state)
-      ? ` Agent state: ${state}. The job may still be queued - try again shortly.`
+      ? ` Agent state: ${state}.`
       : "";
 
     return {
@@ -847,4 +965,22 @@ export async function callRelevanceAgent(
   }
 
   return { success: true, draftText, jobId, raw: data, polled: false };
+}
+
+export function formatRelevanceApiError(err: unknown): {
+  status: number;
+  body: { success: false; error: string };
+} {
+  const message = err instanceof Error ? err.message : "Unknown error";
+  return {
+    status: 500,
+    body: { success: false, error: `Live AI call failed: ${message}` },
+  };
+}
+
+/** @deprecated Use triggerRelevanceAgent — server-side polling removed in favor of client polling. */
+export async function callRelevanceAgent(
+  body: unknown
+): Promise<RelevanceGenerateResult> {
+  return triggerRelevanceAgent(body);
 }

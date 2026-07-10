@@ -13,6 +13,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
+import {
+  PollRelevanceDraftError,
+  requestRelevanceDraftFromApi,
+} from "@/lib/integrations/poll-relevance-draft-client";
 
 export function ContentLifecyclePanel() {
   const [formTitle, setFormTitle] = useState("");
@@ -21,6 +25,7 @@ export function ContentLifecyclePanel() {
   const [draftText, setDraftText] = useState("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateDebugPayload, setGenerateDebugPayload] = useState<string | null>(null);
+  const [pollStatusMessage, setPollStatusMessage] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignSuccess, setAssignSuccess] = useState(false);
   const [basecampUrl, setBasecampUrl] = useState<string | null>(null);
@@ -39,6 +44,7 @@ export function ContentLifecyclePanel() {
   function handleGenerate() {
     setGenerateError(null);
     setGenerateDebugPayload(null);
+    setPollStatusMessage(null);
     setAssignError(null);
     setAssignSuccess(false);
     setBasecampUrl(null);
@@ -52,14 +58,8 @@ export function ContentLifecyclePanel() {
 
     startGenerate(async () => {
       try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-cache",
-          },
-          cache: "no-store",
-          body: JSON.stringify({
+        const result = await requestRelevanceDraftFromApi(
+          {
             title: formTitle.trim(),
             prType: "product_launch",
             thematicFocus: brief.trim() || "General corporate announcement",
@@ -69,30 +69,21 @@ export function ContentLifecyclePanel() {
             pressReleaseType: "Product Launch",
             region: "EMEA",
             language: "English",
-          }),
-        });
+          },
+          {
+            onProgress: (message) => setPollStatusMessage(message),
+          }
+        );
 
-        const data = (await res.json().catch(() => ({
-          success: false,
-          error: "Invalid response from server.",
-        }))) as {
-          success?: boolean;
-          draftText?: string;
-          error?: string;
-          debugPayload?: string;
-        };
-
-        if (!res.ok || !data.success || !data.draftText) {
-          setGenerateError(
-            data.error ??
-              `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
-          );
-          setGenerateDebugPayload(data.debugPayload ?? null);
+        setDraftText(result.draftText);
+        setPollStatusMessage(null);
+      } catch (err) {
+        if (err instanceof PollRelevanceDraftError) {
+          setGenerateError(err.message);
+          setGenerateDebugPayload(err.debugPayload ?? null);
           return;
         }
 
-        setDraftText(data.draftText);
-      } catch (err) {
         const message = err instanceof Error ? err.message : "Network error";
         setGenerateError(`Live AI call failed: ${message}`);
       }
@@ -212,10 +203,17 @@ export function ContentLifecyclePanel() {
           {isGenerating && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <p>
-                Generating your press release draft — the AI agent may take up to a minute while
-                capacity is allocated.
-              </p>
+              <div>
+                <p>
+                  {pollStatusMessage ??
+                    "Generating your press release draft — the AI agent may take a few minutes."}
+                </p>
+                {pollStatusMessage && (
+                  <p className="mt-1 text-xs text-[#005a94]/80">
+                    You can keep this tab open while the agent researches and writes.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

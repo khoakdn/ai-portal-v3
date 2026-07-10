@@ -31,6 +31,10 @@ import {
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
 import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
 import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
+import {
+  PollRelevanceDraftError,
+  requestRelevanceDraftFromApi,
+} from "@/lib/integrations/poll-relevance-draft-client";
 import { DocumentSkeleton } from "@/components/ui/skeleton-loader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -359,6 +363,7 @@ interface DetailedFormProps {
   isTriggering: boolean;
   triggerError: string | null;
   triggerDebugPayload: string | null;
+  pollStatusMessage: string | null;
 }
 
 function DetailedForm({
@@ -368,6 +373,7 @@ function DetailedForm({
   isTriggering,
   triggerError,
   triggerDebugPayload,
+  pollStatusMessage,
 }: DetailedFormProps) {
   const {
     register,
@@ -696,17 +702,24 @@ function DetailedForm({
           {isTriggering && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <p>
-                Generating your press release draft — the AI agent may take up to a minute while
-                capacity is allocated.
-              </p>
+              <div>
+                <p>
+                  {pollStatusMessage ??
+                    "Generating your press release draft — the AI agent may take a few minutes."}
+                </p>
+                {pollStatusMessage && (
+                  <p className="mt-1 text-xs text-[#005a94]/80">
+                    You can keep this tab open while the agent researches and writes.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
           {/* Submit */}
           <Button type="submit" disabled={isTriggering} className="w-full" size="lg">
             {isTriggering
-              ? <><Loader2 className="h-4 w-4 animate-spin" />Generating press release draft (up to ~1 min)…</>
+              ? <><Loader2 className="h-4 w-4 animate-spin" />Generating press release draft…</>
               : <><Zap className="h-4 w-4" />Send to AI Agent</>}
           </Button>
         </div>
@@ -958,6 +971,7 @@ export function PressReleaseStudio() {
   const [currentCtx, setCurrentCtx]     = useState<PressReleaseStructuredContext | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [triggerDebugPayload, setTriggerDebugPayload] = useState<string | null>(null);
+  const [pollStatusMessage, setPollStatusMessage] = useState<string | null>(null);
 
   const [draftText, setDraftText]       = useState("");
   const [saveError, setSaveError]     = useState<string | null>(null);
@@ -977,6 +991,7 @@ export function PressReleaseStudio() {
     setSelectedType(type);
     setTriggerError(null);
     setTriggerDebugPayload(null);
+    setPollStatusMessage(null);
     setDraftText("");
     setPhase("fill-form");
   }
@@ -985,59 +1000,45 @@ export function PressReleaseStudio() {
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
     setTriggerDebugPayload(null);
+    setPollStatusMessage(null);
     setDraftText("");
     setCurrentTitle(title);
     setCurrentCtx(ctx);
     startTrigger(async () => {
       try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-cache",
-          },
-          cache: "no-store",
-          body: JSON.stringify({
+        const result = await requestRelevanceDraftFromApi(
+          {
             title,
-            prType:             selectedType?.id ?? "product_launch",
-            pressReleaseType:   ctx.pressReleaseType,
-            region:             ctx.region,
-            language:           ctx.language,
-            businessUnit:       ctx.businessUnit,
-            priority:           ctx.priority           ?? "",
-            deadline:           ctx.deadline           ?? "",
-            thematicFocus:      ctx.thematicFocus,
-            productsToAddress:  ctx.productsToAddress,
-            infoMaterialLinks:  ctx.infoMaterialLinks  ?? "",
-            contactPerson:      ctx.contactPerson      ?? "",
+            prType: selectedType?.id ?? "product_launch",
+            pressReleaseType: ctx.pressReleaseType,
+            region: ctx.region,
+            language: ctx.language,
+            businessUnit: ctx.businessUnit,
+            priority: ctx.priority ?? "",
+            deadline: ctx.deadline ?? "",
+            thematicFocus: ctx.thematicFocus,
+            productsToAddress: ctx.productsToAddress,
+            infoMaterialLinks: ctx.infoMaterialLinks ?? "",
+            contactPerson: ctx.contactPerson ?? "",
             productDescription: ctx.productDescription,
-            existingSystems:    ctx.existingSystems    ?? "",
-            testReports:        ctx.testReports        ?? "",
-          }),
-        });
+            existingSystems: ctx.existingSystems ?? "",
+            testReports: ctx.testReports ?? "",
+          },
+          {
+            onProgress: (message) => setPollStatusMessage(message),
+          }
+        );
 
-        const data = (await res.json().catch(() => ({
-          success: false,
-          error: "Invalid response from server.",
-        }))) as {
-          success?: boolean;
-          draftText?: string;
-          error?: string;
-          debugPayload?: string;
-        };
-
-        if (!res.ok || !data.success || !data.draftText) {
-          setTriggerError(
-            data.error ??
-              `Live AI call failed: HTTP ${res.status}. Check Vercel logs and RELEVANCE_AI_API_KEY.`
-          );
-          setTriggerDebugPayload(data.debugPayload ?? null);
+        setDraftText(result.draftText);
+        setPollStatusMessage(null);
+        setPhase("review");
+      } catch (err) {
+        if (err instanceof PollRelevanceDraftError) {
+          setTriggerError(err.message);
+          setTriggerDebugPayload(err.debugPayload ?? null);
           return;
         }
 
-        setDraftText(data.draftText);
-        setPhase("review");
-      } catch (err) {
         const message = err instanceof Error ? err.message : "Network error";
         setTriggerError(`Live AI call failed: ${message}`);
       }
@@ -1182,6 +1183,7 @@ export function PressReleaseStudio() {
           isTriggering={isTriggering}
           triggerError={triggerError}
           triggerDebugPayload={triggerDebugPayload}
+          pollStatusMessage={pollStatusMessage}
         />
       )}
 

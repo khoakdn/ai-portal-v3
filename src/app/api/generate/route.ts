@@ -1,14 +1,15 @@
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 import { NextResponse } from "next/server";
 import {
-  callRelevanceAgent,
   formatRelevanceApiError,
   normalizeIncomingBody,
   resolveAgentId,
+  triggerRelevanceAgent,
 } from "@/lib/integrations/relevance-generate";
+import { relevanceResultToApiJson } from "@/lib/integrations/relevance-generate-response";
 
 const NO_CACHE_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -27,29 +28,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await callRelevanceAgent(body);
+    const result = await triggerRelevanceAgent(body);
+    const { body: responseBody, status } = relevanceResultToApiJson(result);
 
-    if (!result.success) {
-      console.warn("[/api/generate] Agent response issue:", result.error);
-      return NextResponse.json(
-        {
-          success: false,
-          error: result.error,
-          debugPayload: result.debugPayload,
-          jobId: result.jobId,
-        },
-        { status: result.status ?? 200, headers: NO_CACHE_HEADERS }
+    if (result.success) {
+      console.info(
+        `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}`
       );
+    } else if (result.pending) {
+      console.info(
+        `[/api/generate] Agent ${resolveAgentId()} queued job ${result.jobId} (state: ${result.state ?? "unknown"}) for client polling.`
+      );
+    } else {
+      console.warn("[/api/generate] Agent response issue:", result.error);
     }
 
-    console.info(
-      `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}${result.polled ? " (polled)" : ""}`
-    );
-
-    return NextResponse.json(
-      { success: true, draftText: result.draftText, jobId: result.jobId },
-      { headers: NO_CACHE_HEADERS }
-    );
+    return NextResponse.json(responseBody, { status, headers: NO_CACHE_HEADERS });
   } catch (err) {
     const { status, body } = formatRelevanceApiError(err);
     console.error("[/api/generate]", body.error);
