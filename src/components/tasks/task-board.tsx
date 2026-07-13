@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, useOptimistic } from "react";
+import { useState, useTransition, useOptimistic, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -21,6 +22,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { updateTaskStatus } from "@/actions/tasks/update-task-status";
+import { deleteTask } from "@/actions/tasks/delete-task";
 import { requestChanges } from "@/actions/tasks/request-changes";
 import { getTaskDetail, type TaskDetail } from "@/actions/tasks/get-task-detail";
 import type { TaskRow } from "@/actions/tasks/get-tasks";
@@ -38,6 +40,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { DraftReviewWorkflow } from "@/components/shared/draft-review-workflow";
 import type { TaskStatus } from "@/types/database";
 
 const COMPLETED_STATUSES: TaskStatus[] = ["approved", "rejected"];
@@ -97,6 +100,7 @@ interface TaskBoardProps {
 }
 
 export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
+  const router = useRouter();
   const [statusFilter, setStatusFilter]   = useState<TaskStatus | "all">("all");
   const [rcDialog, setRcDialog]           = useState<RequestChangesDialogState | null>(null);
   const [feedback, setFeedback]           = useState("");
@@ -124,6 +128,7 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
   // Admin: prune completed / remove rows locally
   const [hideCompleted, setHideCompleted]   = useState(false);
   const [removedTaskIds, setRemovedTaskIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId]         = useState<string | null>(null);
 
   const [optimisticTasks, updateOptimisticTasks] = useOptimistic(
     initialTasks,
@@ -152,8 +157,29 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
 
   function handleDeleteTask(taskId: string) {
     setActionError(null);
-    setRemovedTaskIds((prev) => new Set(prev).add(taskId));
-    if (viewTaskId === taskId) closeViewPanel();
+    setDeletingId(taskId);
+
+    startTransition(async () => {
+      try {
+        const result = await deleteTask(taskId);
+
+        if (!result.success) {
+          console.error("[TaskBoard] Delete failed for task:", taskId, result.error);
+          setActionError(result.error ?? "Failed to delete task. Please try again.");
+          return;
+        }
+
+        setRemovedTaskIds((prev) => new Set(prev).add(taskId));
+        if (viewTaskId === taskId) closeViewPanel();
+        router.refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        console.error("[TaskBoard] Delete threw for task:", taskId, message);
+        setActionError(`Failed to delete task: ${message}`);
+      } finally {
+        setDeletingId(null);
+      }
+    });
   }
 
   function handleStatusChange(taskId: string, newStatus: TaskStatus) {
@@ -413,6 +439,7 @@ export function TaskBoard({ initialTasks, fetchError }: TaskBoardProps) {
                   onSubmit={() => handleStatusChange(task.id, "pending_approval")}
                   onView={() => handleOpenView(task.id)}
                   onDelete={() => handleDeleteTask(task.id)}
+                  isDeleting={deletingId === task.id}
                   isApproving={approvingId === task.id}
                   isSubmitting={submittingId === task.id}
                   approveSuccess={approveSuccessId === task.id}
@@ -495,9 +522,22 @@ function TaskViewPanel({
   task: TaskDetail | null;
   onClose: () => void;
 }) {
+  const [draftText, setDraftText] = useState("");
+
+  useEffect(() => {
+    if (task) {
+      setDraftText(taskContentPreview(task));
+    } else {
+      setDraftText("");
+    }
+  }, [task]);
+
   if (!open) return null;
 
-  const preview = task ? taskContentPreview(task) : "";
+  const contentPrefix =
+    task?.content_draft?.type === "social_post"
+      ? "Review Social Post Draft:"
+      : "Review Press Release Draft:";
 
   return (
     <>
@@ -513,7 +553,7 @@ function TaskViewPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Task detail preview"
-        className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl animate-in slide-in-from-right duration-300"
+        className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-2xl animate-in slide-in-from-right duration-300"
       >
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-6 py-5">
@@ -563,14 +603,14 @@ function TaskViewPanel({
                   {task.latest_feedback}
                 </div>
               )}
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Document Content
-                </p>
-                <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700">
-                  {preview || "No document body on file."}
-                </pre>
-              </div>
+
+              <DraftReviewWorkflow
+                draftText={draftText}
+                onDraftChange={setDraftText}
+                taskTitle={task.title}
+                contentPrefix={contentPrefix}
+                readOnly={task.status === "approved" || task.status === "rejected"}
+              />
             </div>
           ) : null}
         </div>
@@ -598,6 +638,7 @@ function TaskTableRow({
   onSubmit,
   onView,
   onDelete,
+  isDeleting,
   isApproving,
   isSubmitting,
   approveSuccess,
@@ -608,6 +649,7 @@ function TaskTableRow({
   onSubmit: () => void;
   onView: () => void;
   onDelete: () => void;
+  isDeleting: boolean;
   isApproving: boolean;
   isSubmitting: boolean;
   approveSuccess: boolean;
@@ -686,11 +728,16 @@ function TaskTableRow({
           <button
             type="button"
             onClick={onDelete}
+            disabled={isDeleting}
             title="Remove task from list"
             aria-label={`Remove ${task.title} from list`}
-            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            {isDeleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
           </button>
         </div>
       </td>

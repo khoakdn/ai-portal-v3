@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -32,14 +32,33 @@ import { generatePressRelease, type PressReleaseStructuredContext } from "@/acti
 import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
 import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import {
-  PollRelevanceDraftError,
-  requestRelevanceDraftFromApi,
-} from "@/lib/integrations/poll-relevance-draft-client";
+  requestDraftFromGenerateApi,
+} from "@/lib/integrations/request-generate-api";
 import { DocumentSkeleton } from "@/components/ui/skeleton-loader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { REVIEW_HANDOFF_REVIEWERS } from "@/components/shared/draft-review-workflow";
+import {
+  REVIEWER_FEEDBACK_MESSAGE,
+  applyReviewerFeedbackFix,
+  improveDemoDraft,
+  MOCK_OPTIMIZE_DELAY_MS,
+} from "@/lib/demo/generate-mock-draft";
+import {
+  DELTA_BUSINESS_UNITS,
+  DEFAULT_DELTA_BUSINESS_UNIT,
+} from "@/lib/content/delta-business-units";
+import { useReviewerNotification } from "@/contexts/reviewer-notification-context";
+import { useRegisterReviewerApplyFix } from "@/hooks/use-register-reviewer-apply-fix";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +125,7 @@ const formSchema = z.object({
   title:             z.string().min(3, "Title must be at least 3 characters"),
   region:            z.string().min(1, "Region is required"),
   language:          z.string().min(1, "Language is required"),
-  businessUnit:      z.string().min(1, "Business unit is required"),
+  businessUnit:      z.enum(DELTA_BUSINESS_UNITS),
   priority:          z.string().optional(),
   deadline:          z.string().optional(),
   thematicFocus:     z.string().min(20, "Please provide more detail (min 20 characters)"),
@@ -126,7 +145,7 @@ type FormValues = z.infer<typeof formSchema>;
 
 const REGIONS = ["Global", "EMEA", "APAC", "Americas", "DACH", "UK & Ireland", "Benelux", "Nordics"];
 const LANGUAGES = ["English", "German", "French", "Spanish", "Dutch", "Swedish", "Italian", "Portuguese"];
-const BUSINESS_UNITS = ["Marketing", "Product Management", "Sales", "R&D", "Corporate Communications", "Digital", "Engineering", "Operations"];
+const BUSINESS_UNITS = [...DELTA_BUSINESS_UNITS];
 const PRIORITIES = ["High", "Medium", "Low"];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,7 +382,6 @@ interface DetailedFormProps {
   isTriggering: boolean;
   triggerError: string | null;
   triggerDebugPayload: string | null;
-  pollStatusMessage: string | null;
 }
 
 function DetailedForm({
@@ -373,7 +391,6 @@ function DetailedForm({
   isTriggering,
   triggerError,
   triggerDebugPayload,
-  pollStatusMessage,
 }: DetailedFormProps) {
   const {
     register,
@@ -386,7 +403,7 @@ function DetailedForm({
       title: "",
       region: "",
       language: "",
-      businessUnit: "",
+      businessUnit: DEFAULT_DELTA_BUSINESS_UNIT,
       priority: "",
       deadline: "",
       thematicFocus: "",
@@ -441,10 +458,7 @@ function DetailedForm({
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-12 items-start">
-
-        {/* ── Left: Form (7/12) ──────────────────────────────── */}
-        <div className="space-y-5 lg:col-span-7">
+      <div className="mx-auto max-w-3xl space-y-5">
 
           {/* ─ Basic Info ─ */}
           <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -702,17 +716,7 @@ function DetailedForm({
           {isTriggering && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <div>
-                <p>
-                  {pollStatusMessage ??
-                    "Generating your press release draft — the AI agent may take a few minutes."}
-                </p>
-                {pollStatusMessage && (
-                  <p className="mt-1 text-xs text-[#005a94]/80">
-                    You can keep this tab open while the agent researches and writes.
-                  </p>
-                )}
-              </div>
+              <p>Generating your press release draft…</p>
             </div>
           )}
 
@@ -722,41 +726,6 @@ function DetailedForm({
               ? <><Loader2 className="h-4 w-4 animate-spin" />Generating press release draft…</>
               : <><Zap className="h-4 w-4" />Send to AI Agent</>}
           </Button>
-        </div>
-
-        {/* ── Right: Relevance AI chatbox (5/12) ──────────────── */}
-        <div className="pointer-events-auto relative z-10 sticky top-6 lg:col-span-5">
-          {/* Premium container card */}
-          <div className="pointer-events-auto relative z-10 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-
-            {/* Header strip */}
-            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-              <div className="flex items-center gap-2.5">
-                {/* Live pulse dot */}
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-                <span className="text-[13px] font-semibold text-slate-700">
-                  DeltaPR Interactive Assistant
-                </span>
-              </div>
-              <span className="rounded-full bg-[#0087DC]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0087DC]">
-                Live
-              </span>
-            </div>
-
-            {/* Iframe */}
-            <div className="pointer-events-auto relative z-10 flex min-h-[500px] flex-1 p-1">
-              <iframe
-                src="https://app.relevanceai.com/agents/d7b62b/b775f35a-beef-4538-b4fe-a26e39c85077/7d952fd2-b498-45f4-83e0-97984ef1eab7/embed-chat?hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=agent&primary_color=%230087dc&bubble_icon=pd%2Fchat&input_placeholder_text=Type+your+message...&hide_logo=true&hide_description=false"
-                className="pointer-events-auto relative z-10 h-full min-h-[500px] w-full flex-1 rounded-xl border-0"
-                allow="microphone"
-                title="DeltaPR Interactive Assistant"
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </form>
   );
@@ -788,6 +757,10 @@ interface ReviewPhaseProps {
   syncError: string | null;
   syncResult: SyncResult | null;
   onFinalApproval: () => void;
+  onOptimizeDraft: () => void;
+  isOptimizing: boolean;
+  selectedReviewer: string;
+  onReviewerChange: (value: string) => void;
 }
 
 function ReviewPhase({
@@ -796,8 +769,15 @@ function ReviewPhase({
   isSaving, isSubmitting, saveError,
   onSaveAsDraft, onSubmitForApproval,
   isSyncing, syncSuccess, syncError, syncResult, onFinalApproval,
+  onOptimizeDraft,
+  isOptimizing,
+  selectedReviewer,
+  onReviewerChange,
 }: ReviewPhaseProps) {
   const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
+  const reviewerName =
+    REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer)?.name ??
+    REVIEW_HANDOFF_REVIEWERS[0].name;
 
   return (
     <div className="space-y-5">
@@ -840,14 +820,47 @@ function ReviewPhase({
           </div>
         </div>
 
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onOptimizeDraft}
+          disabled={isOptimizing || !draftText.trim()}
+          className="w-full border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
+        >
+          {isOptimizing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Optimizing placeholders…
+            </>
+          ) : (
+            <>✨ Optimize with AI</>
+          )}
+        </Button>
+
         {/* Forward for verification — directly under draft */}
         <div className="rounded-2xl border border-[#a7d33f]/40 bg-gradient-to-br from-[#a7d33f]/8 to-white p-6 shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-widest text-[#5a8a14]">
             Forward Draft for Verification
           </p>
           <p className="mt-1.5 text-sm text-slate-600">
-            Push this live draft to Bilyana&apos;s Basecamp review queue. Edit the draft above before assigning.
+            Route this draft to a communications reviewer. Edit the draft above before assigning.
           </p>
+
+          <div className="mt-4 space-y-2">
+            <Label htmlFor="press-release-reviewer-select">Assign reviewer</Label>
+            <Select value={selectedReviewer} onValueChange={onReviewerChange}>
+              <SelectTrigger id="press-release-reviewer-select">
+                <SelectValue placeholder="Select reviewer" />
+              </SelectTrigger>
+              <SelectContent>
+                {REVIEW_HANDOFF_REVIEWERS.map((reviewer) => (
+                  <SelectItem key={reviewer.id} value={reviewer.id}>
+                    {reviewer.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {syncSuccess && syncResult ? (
             <div className="mt-4 overflow-hidden rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10">
@@ -857,7 +870,7 @@ function ReviewPhase({
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-[#3d6b0e]">
-                    Assigned to Bilyana Mihova on Basecamp!
+                    Task Dispatched — assigned to {reviewerName} on Basecamp!
                   </p>
                   <p className="mt-0.5 text-[11px] text-[#5a8a14]">
                     {syncResult.simulated
@@ -901,7 +914,7 @@ function ReviewPhase({
               ) : (
                 <>
                   <UserCheck className="h-4 w-4" />
-                  Assign to Bilyana for Review
+                  Assign for Review
                 </>
               )}
             </button>
@@ -971,7 +984,6 @@ export function PressReleaseStudio() {
   const [currentCtx, setCurrentCtx]     = useState<PressReleaseStructuredContext | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [triggerDebugPayload, setTriggerDebugPayload] = useState<string | null>(null);
-  const [pollStatusMessage, setPollStatusMessage] = useState<string | null>(null);
 
   const [draftText, setDraftText]       = useState("");
   const [saveError, setSaveError]     = useState<string | null>(null);
@@ -982,16 +994,34 @@ export function PressReleaseStudio() {
   const [syncError, setSyncError]     = useState<string | null>(null);
   const [syncResult, setSyncResult]   = useState<SyncResult | null>(null);
   const [saved, setSaved]           = useState<SavedState | null>(null);
+  const [selectedReviewer, setSelectedReviewer] = useState<string>(
+    REVIEW_HANDOFF_REVIEWERS[0].id
+  );
+  const { addNotification, clearNotifications } = useReviewerNotification();
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useRegisterReviewerApplyFix(() => {
+    if (!draftText.trim()) return;
+    setDraftText(
+      applyReviewerFeedbackFix(draftText, currentCtx?.businessUnit)
+    );
+  }, phase === "review");
 
   const [isTriggering, startTrigger] = useTransition();
+  const [isOptimizing, startOptimize] = useTransition();
   const [isSaving,     startSave]    = useTransition();
   const [isSubmitting, startSubmit]  = useTransition();
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+    };
+  }, []);
 
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
     setTriggerError(null);
     setTriggerDebugPayload(null);
-    setPollStatusMessage(null);
     setDraftText("");
     setPhase("fill-form");
   }
@@ -1000,48 +1030,46 @@ export function PressReleaseStudio() {
   function handleAgentTrigger(title: string, ctx: PressReleaseStructuredContext) {
     setTriggerError(null);
     setTriggerDebugPayload(null);
-    setPollStatusMessage(null);
     setDraftText("");
     setCurrentTitle(title);
     setCurrentCtx(ctx);
     startTrigger(async () => {
       try {
-        const result = await requestRelevanceDraftFromApi(
-          {
-            title,
-            prType: selectedType?.id ?? "product_launch",
-            pressReleaseType: ctx.pressReleaseType,
-            region: ctx.region,
-            language: ctx.language,
-            businessUnit: ctx.businessUnit,
-            priority: ctx.priority ?? "",
-            deadline: ctx.deadline ?? "",
-            thematicFocus: ctx.thematicFocus,
-            productsToAddress: ctx.productsToAddress,
-            infoMaterialLinks: ctx.infoMaterialLinks ?? "",
-            contactPerson: ctx.contactPerson ?? "",
-            productDescription: ctx.productDescription,
-            existingSystems: ctx.existingSystems ?? "",
-            testReports: ctx.testReports ?? "",
-          },
-          {
-            onProgress: (message) => setPollStatusMessage(message),
-          }
-        );
+        const draft = await requestDraftFromGenerateApi({
+          title,
+          prType: selectedType?.id ?? "product_launch",
+          pressReleaseType: ctx.pressReleaseType,
+          region: ctx.region,
+          language: ctx.language,
+          businessUnit: ctx.businessUnit,
+          priority: ctx.priority ?? "",
+          deadline: ctx.deadline ?? "",
+          thematicFocus: ctx.thematicFocus,
+          productsToAddress: ctx.productsToAddress,
+          infoMaterialLinks: ctx.infoMaterialLinks ?? "",
+          contactPerson: ctx.contactPerson ?? "",
+          productDescription: ctx.productDescription,
+          existingSystems: ctx.existingSystems ?? "",
+          testReports: ctx.testReports ?? "",
+        });
 
-        setDraftText(result.draftText);
-        setPollStatusMessage(null);
+        setDraftText(draft);
         setPhase("review");
       } catch (err) {
-        if (err instanceof PollRelevanceDraftError) {
-          setTriggerError(err.message);
-          setTriggerDebugPayload(err.debugPayload ?? null);
-          return;
-        }
-
         const message = err instanceof Error ? err.message : "Network error";
         setTriggerError(`Live AI call failed: ${message}`);
       }
+    });
+  }
+
+  function handleOptimizeDraft() {
+    if (!draftText.trim() || isOptimizing) return;
+
+    setTriggerError(null);
+    startOptimize(async () => {
+      await new Promise((resolve) => setTimeout(resolve, MOCK_OPTIMIZE_DELAY_MS));
+      const improved = improveDemoDraft(draftText, currentCtx?.businessUnit);
+      setDraftText(improved);
     });
   }
 
@@ -1078,7 +1106,7 @@ export function PressReleaseStudio() {
       if (result.success && result.taskId) {
         await createBasecampTodoFromClient({
           title: currentTitle,
-          businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
+          businessUnit: currentCtx?.businessUnit ?? DEFAULT_DELTA_BUSINESS_UNIT,
           draftText,
           contentPrefix: "Review Press Release Draft:",
         });
@@ -1097,12 +1125,16 @@ export function PressReleaseStudio() {
     setSyncError(null);
     setSyncResult(null);
 
+    const selectedAssignee =
+      REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer)?.name ??
+      "Bilyana Mihova";
+
     try {
       const data = await createBasecampTodoFromClient({
         title: currentTitle,
-        businessUnit: currentCtx?.businessUnit ?? "Marketing Communications",
+        businessUnit: currentCtx?.businessUnit ?? DEFAULT_DELTA_BUSINESS_UNIT,
         draftText,
-        contentPrefix: "Review Press Release Draft:",
+        contentPrefix: `Review Press Release Draft: (Reviewer: ${selectedAssignee})`,
       });
 
       if (data.success) {
@@ -1112,6 +1144,14 @@ export function PressReleaseStudio() {
           simulated: data.simulated,
         });
         setSyncSuccess(true);
+
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = setTimeout(() => {
+          addNotification({
+            sender: selectedAssignee || "Bilyana Mihova",
+            message: REVIEWER_FEEDBACK_MESSAGE,
+          });
+        }, 4000);
       } else {
         setSyncError(data.error ?? "Basecamp sync failed. Please try again.");
       }
@@ -1135,6 +1175,8 @@ export function PressReleaseStudio() {
     setSyncSuccess(false);
     setSyncError(null);
     setSyncResult(null);
+    clearNotifications();
+    if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
   }
 
   // ── Saved (Gemini path) ────────────────────────────────────────────────
@@ -1166,6 +1208,7 @@ export function PressReleaseStudio() {
 
   return (
     <div>
+
       {phase === "select-type" && (
         <TypeSelectionGrid onSelect={handleTypeSelect} />
       )}
@@ -1183,7 +1226,6 @@ export function PressReleaseStudio() {
           isTriggering={isTriggering}
           triggerError={triggerError}
           triggerDebugPayload={triggerDebugPayload}
-          pollStatusMessage={pollStatusMessage}
         />
       )}
 
@@ -1203,6 +1245,10 @@ export function PressReleaseStudio() {
           syncError={syncError}
           syncResult={syncResult}
           onFinalApproval={handleFinalApproval}
+          onOptimizeDraft={handleOptimizeDraft}
+          isOptimizing={isOptimizing}
+          selectedReviewer={selectedReviewer}
+          onReviewerChange={setSelectedReviewer}
         />
       )}
     </div>

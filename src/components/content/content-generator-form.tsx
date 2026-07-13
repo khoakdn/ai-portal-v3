@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { requestImprovedDraftFromGenerateApi } from "@/lib/integrations/request-generate-api";
 import type { ContentType } from "@/types/database";
 
 type Phase = "input" | "review" | "saved";
@@ -308,6 +309,7 @@ export function ContentGeneratorForm({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [isGenerating, startGenerate] = useTransition();
+  const [isOptimizing, startOptimize] = useTransition();
   const [isSaving, startSave] = useTransition();
   const [isSubmitting, startSubmit] = useTransition();
 
@@ -332,6 +334,20 @@ export function ContentGeneratorForm({
     setPhase("input");
     setDraftBody("");
     setSaveError(null);
+  }
+
+  function handleOptimizeDraft() {
+    if (!draftBody.trim()) return;
+    setSaveError(null);
+    startOptimize(async () => {
+      try {
+        const improved = await requestImprovedDraftFromGenerateApi(draftBody);
+        setDraftBody(improved);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Network error";
+        setSaveError(`Optimization failed: ${message}`);
+      }
+    });
   }
 
   function handleSaveAsDraft() {
@@ -641,6 +657,25 @@ export function ContentGeneratorForm({
               </div>
             )}
           </div>
+
+          {isReview && contentType === "press_release" && draftBody && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleOptimizeDraft}
+              disabled={isOptimizing || !draftBody.trim()}
+              className="w-full border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
+            >
+              {isOptimizing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Optimizing placeholders…
+                </>
+              ) : (
+                <>✨ Optimize &amp; Fill Placeholders with AI</>
+              )}
+            </Button>
+          )}
 
           {/* Save / Submit actions (only in review phase) */}
           {isReview && (

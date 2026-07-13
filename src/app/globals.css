@@ -159,6 +159,16 @@ body {
   to   { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  15%      { transform: rotate(-12deg); }
+  30%      { transform: rotate(10deg); }
+  45%      { transform: rotate(-8deg); }
+  60%      { transform: rotate(6deg); }
+  75%      { transform: rotate(-4deg); }
+  90%      { transform: rotate(2deg); }
+}
+
 @keyframes shimmer {
   from { background-position: -400px 0; }
   to   { background-position:  400px 0; }
@@ -166,6 +176,7 @@ body {
 
 .animate-fade-in     { animation: fade-in 0.25s ease both; }
 .animate-slide-right { animation: slide-in-right 0.2s ease both; }
+.animate-wiggle      { animation: wiggle 500ms ease-in-out both; }
 
 /* ── Skeleton shimmer ──────────────────────────────────────────────────── */
 .skeleton {

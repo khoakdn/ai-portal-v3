@@ -4,19 +4,14 @@ import { useState, useTransition, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
-  CheckCircle2,
-  ExternalLink,
   Loader2,
   Sparkles,
-  UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import {
-  PollRelevanceDraftError,
-  requestRelevanceDraftFromApi,
-} from "@/lib/integrations/poll-relevance-draft-client";
+  requestDraftFromGenerateApi,
+} from "@/lib/integrations/request-generate-api";
+import { DraftReviewWorkflow } from "@/components/shared/draft-review-workflow";
 
 export function ContentLifecyclePanel() {
   const [formTitle, setFormTitle] = useState("");
@@ -25,14 +20,8 @@ export function ContentLifecyclePanel() {
   const [draftText, setDraftText] = useState("");
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateDebugPayload, setGenerateDebugPayload] = useState<string | null>(null);
-  const [pollStatusMessage, setPollStatusMessage] = useState<string | null>(null);
-  const [assignError, setAssignError] = useState<string | null>(null);
-  const [assignSuccess, setAssignSuccess] = useState(false);
-  const [basecampUrl, setBasecampUrl] = useState<string | null>(null);
-  const [todoId, setTodoId] = useState<number | null>(null);
 
   const [isGenerating, startGenerate] = useTransition();
-  const [isAssigning, startAssign] = useTransition();
   const draftPreviewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,11 +33,6 @@ export function ContentLifecyclePanel() {
   function handleGenerate() {
     setGenerateError(null);
     setGenerateDebugPayload(null);
-    setPollStatusMessage(null);
-    setAssignError(null);
-    setAssignSuccess(false);
-    setBasecampUrl(null);
-    setTodoId(null);
     setDraftText("");
 
     if (!formTitle.trim()) {
@@ -58,71 +42,25 @@ export function ContentLifecyclePanel() {
 
     startGenerate(async () => {
       try {
-        const result = await requestRelevanceDraftFromApi(
-          {
-            title: formTitle.trim(),
-            prType: "product_launch",
-            thematicFocus: brief.trim() || "General corporate announcement",
-            productDescription: brief.trim(),
-            productsToAddress: brief.trim(),
-            businessUnit,
-            pressReleaseType: "Product Launch",
-            region: "EMEA",
-            language: "English",
-          },
-          {
-            onProgress: (message) => setPollStatusMessage(message),
-          }
-        );
+        const draft = await requestDraftFromGenerateApi({
+          title: formTitle.trim(),
+          prType: "product_launch",
+          thematicFocus: brief.trim() || "General corporate announcement",
+          productDescription: brief.trim(),
+          productsToAddress: brief.trim(),
+          businessUnit,
+          pressReleaseType: "Product Launch",
+          region: "EMEA",
+          language: "English",
+        });
 
-        setDraftText(result.draftText);
-        setPollStatusMessage(null);
+        setDraftText(draft);
       } catch (err) {
-        if (err instanceof PollRelevanceDraftError) {
-          setGenerateError(err.message);
-          setGenerateDebugPayload(err.debugPayload ?? null);
-          return;
-        }
-
         const message = err instanceof Error ? err.message : "Network error";
         setGenerateError(`Live AI call failed: ${message}`);
       }
     });
   }
-
-  function handleAssignToBilyana() {
-    setAssignError(null);
-    setAssignSuccess(false);
-
-    if (!formTitle.trim() || !draftText.trim()) {
-      setAssignError("Generate a draft before assigning for review.");
-      return;
-    }
-
-    startAssign(async () => {
-      try {
-        const data = await createBasecampTodoFromClient({
-          title: formTitle.trim(),
-          draftText,
-          businessUnit,
-        });
-
-        if (!data.success) {
-          setAssignError(data.error ?? "Basecamp sync failed. Please try again.");
-          return;
-        }
-
-        setAssignSuccess(true);
-        setTodoId(data.todoId ?? null);
-        setBasecampUrl(data.appUrl ?? null);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Network error";
-        setAssignError(message);
-      }
-    });
-  }
-
-  const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
 
   return (
     <div className="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
@@ -190,7 +128,7 @@ export function ContentLifecyclePanel() {
             {isGenerating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating press release draft (up to ~1 min)…
+                Generating press release draft…
               </>
             ) : (
               <>
@@ -203,17 +141,7 @@ export function ContentLifecyclePanel() {
           {isGenerating && (
             <div className="flex items-start gap-2.5 rounded-xl border border-[#0087DC]/20 bg-[#0087DC]/5 p-4 text-sm text-[#005a94]">
               <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
-              <div>
-                <p>
-                  {pollStatusMessage ??
-                    "Generating your press release draft — the AI agent may take a few minutes."}
-                </p>
-                {pollStatusMessage && (
-                  <p className="mt-1 text-xs text-[#005a94]/80">
-                    You can keep this tab open while the agent researches and writes.
-                  </p>
-                )}
-              </div>
+              <p>Generating your press release draft…</p>
             </div>
           )}
 
@@ -237,93 +165,13 @@ export function ContentLifecyclePanel() {
 
         {/* Draft preview */}
         {draftText && (
-          <div ref={draftPreviewRef} className="animate-fade-in space-y-4">
-            <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0087DC] text-[11px] font-bold text-white">
-                    ✓
-                  </span>
-                  <h3 className="text-sm font-semibold text-slate-800">Generated Draft</h3>
-                </div>
-                <span className="text-xs text-slate-400">{wordCount} words · editable</span>
-              </div>
-              <textarea
-                value={draftText}
-                onChange={(e) => setDraftText(e.target.value)}
-                rows={12}
-                className="w-full resize-y border-0 bg-white px-5 py-4 font-mono text-[13px] leading-relaxed text-slate-700 outline-none focus:ring-0"
-                aria-label="Generated draft preview"
-              />
-            </div>
-
-            {/* Forward for verification */}
-            <div className="rounded-2xl border border-[#a7d33f]/40 bg-gradient-to-br from-[#a7d33f]/8 to-white p-5 shadow-sm">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-[#5a8a14]">
-                Forward Draft for Verification
-              </p>
-              <p className="mt-1.5 text-sm text-slate-600">
-                Push this live draft to Bilyana&apos;s Basecamp review queue. You can edit the text above before assigning.
-              </p>
-
-              {assignSuccess ? (
-                <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10 p-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[#3d6b0e]" />
-                  <div>
-                    <p className="text-sm font-semibold text-[#3d6b0e]">
-                      Assigned to Bilyana Mihova on Basecamp!
-                    </p>
-                    <p className="mt-0.5 text-xs text-[#5a8a14]">
-                      {todoId ? `Todo #${todoId} · push notification sent` : "Review task created successfully"}
-                    </p>
-                    {basecampUrl && (
-                      <a
-                        href={basecampUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#0087DC] hover:underline"
-                      >
-                        View in Basecamp
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  onClick={handleAssignToBilyana}
-                  disabled={isAssigning || !draftText.trim()}
-                  className={cn(
-                    "mt-4 w-full font-semibold text-white shadow-sm",
-                    "bg-[#a7d33f] hover:bg-[#96bc38] text-[#2d4a0a]"
-                  )}
-                  size="lg"
-                >
-                  {isAssigning ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Assigning to Basecamp…
-                    </>
-                  ) : (
-                    <>
-                      <UserCheck className="mr-2 h-4 w-4" />
-                      Assign to Bilyana for Review
-                    </>
-                  )}
-                </Button>
-              )}
-
-              {assignError && !assignSuccess && (
-                <div
-                  className="mt-3 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700"
-                  role="alert"
-                >
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  {assignError}
-                </div>
-              )}
-            </div>
+          <div ref={draftPreviewRef}>
+            <DraftReviewWorkflow
+              draftText={draftText}
+              onDraftChange={setDraftText}
+              taskTitle={formTitle.trim() || "Press Release Draft"}
+              businessUnit={businessUnit}
+            />
           </div>
         )}
 

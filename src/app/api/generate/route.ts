@@ -4,21 +4,43 @@ export const maxDuration = 30;
 
 import { NextResponse } from "next/server";
 import {
-  formatRelevanceApiError,
-  normalizeIncomingBody,
-  resolveAgentId,
-  triggerRelevanceAgent,
-} from "@/lib/integrations/relevance-generate";
-import { relevanceResultToApiJson } from "@/lib/integrations/relevance-generate-response";
+  getDemoDraftStandard,
+  improveDemoDraft,
+  simulateGenerateLatency,
+} from "@/lib/demo/generate-mock-draft";
+import { normalizeIncomingBody } from "@/lib/integrations/relevance-generate";
 
 const NO_CACHE_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate",
   Pragma: "no-cache",
 };
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
+    const body = await request.json();
+    await simulateGenerateLatency();
+
+    if (body.action === "improve") {
+      const source =
+        typeof body.draftText === "string" && body.draftText.trim()
+          ? body.draftText
+          : getDemoDraftStandard(
+              typeof body.businessUnit === "string" ? body.businessUnit : undefined
+            );
+
+      const draftText = improveDemoDraft(
+        source,
+        typeof body.businessUnit === "string" ? body.businessUnit : undefined
+      );
+
+      console.info("[/api/generate] Demo improve — placeholders filled.");
+
+      return NextResponse.json(
+        { success: true, draftText, jobId: "demo-improve" },
+        { headers: NO_CACHE_HEADERS }
+      );
+    }
+
     const incoming = normalizeIncomingBody(body);
 
     if (!incoming.title?.trim() && !incoming.productName?.trim()) {
@@ -28,25 +50,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await triggerRelevanceAgent(body);
-    const { body: responseBody, status } = relevanceResultToApiJson(result);
+    const draftText = getDemoDraftStandard(incoming.businessUnit || undefined);
 
-    if (result.success) {
-      console.info(
-        `[/api/generate] Agent ${resolveAgentId()} completed. Job: ${result.jobId}. Draft length: ${result.draftText.length}`
-      );
-    } else if (result.pending) {
-      console.info(
-        `[/api/generate] Agent ${resolveAgentId()} queued job ${result.jobId} (state: ${result.state ?? "unknown"}) for client polling.`
-      );
-    } else {
-      console.warn("[/api/generate] Agent response issue:", result.error);
-    }
+    console.info(
+      `[/api/generate] Demo draft served (${draftText.length} chars) for "${incoming.title || incoming.productName}" · BU ${incoming.businessUnit || "EVS"}.`
+    );
 
-    return NextResponse.json(responseBody, { status, headers: NO_CACHE_HEADERS });
+    return NextResponse.json(
+      { success: true, draftText, jobId: "demo-generate" },
+      { headers: NO_CACHE_HEADERS }
+    );
   } catch (err) {
-    const { status, body } = formatRelevanceApiError(err);
-    console.error("[/api/generate]", body.error);
-    return NextResponse.json(body, { status, headers: NO_CACHE_HEADERS });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[/api/generate]", message);
+    return NextResponse.json(
+      { success: false, error: `Live AI call failed: ${message}` },
+      { status: 500, headers: NO_CACHE_HEADERS }
+    );
   }
 }

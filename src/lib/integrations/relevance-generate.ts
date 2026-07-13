@@ -94,6 +94,7 @@ export interface NormalizedIncoming {
   keyMessages: string;
   quote: string;
   strategicPriorities: string;
+  businessUnit: string;
   features: string[];
   title: string;
 }
@@ -149,8 +150,8 @@ export function normalizeIncomingBody(body: unknown): NormalizedIncoming {
   const strategicPriorities =
     stringField(incoming.strategicPriorities) ||
     stringField(incoming.strategic_priorities) ||
-    stringField(incoming.businessUnit) ||
     "";
+  const businessUnit = stringField(incoming.businessUnit) || "";
 
   let features = normalizeFeaturesValue(incoming.features);
   if (features.length === 0) {
@@ -167,6 +168,7 @@ export function normalizeIncomingBody(body: unknown): NormalizedIncoming {
     keyMessages,
     quote,
     strategicPriorities,
+    businessUnit,
     features,
     title: stringField(incoming.title) || productName,
   };
@@ -191,6 +193,7 @@ export function normalizedToFormData(normalized: NormalizedIncoming): Record<str
     quote: normalized.quote,
     strategicPriorities: normalized.strategicPriorities,
     strategic_priorities: normalized.strategicPriorities,
+    businessUnit: normalized.businessUnit,
     features: normalized.features.join(", "),
     productsToAddress: normalized.features.join(", "),
     pressReleaseType: normalized.prType,

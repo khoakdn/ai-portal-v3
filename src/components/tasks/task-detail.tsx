@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
+import { DraftReviewWorkflow } from "@/components/shared/draft-review-workflow";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status pill
@@ -683,6 +684,7 @@ function ReviewerActionBar({
 
 function AuthorEditor({
   taskId,
+  taskTitle,
   initialContent,
   currentVersion,
   latestFeedback,
@@ -690,6 +692,7 @@ function AuthorEditor({
   onOptimisticUpdate,
 }: {
   taskId: string;
+  taskTitle: string;
   initialContent: string;
   currentVersion: number;
   latestFeedback: string | null;
@@ -752,15 +755,15 @@ function AuthorEditor({
       {error && (
         <p className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</p>
       )}
-      <Textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        rows={20}
-        className="resize-none font-mono text-sm leading-relaxed"
-        placeholder="Document content…"
-        aria-label="Document content editor"
+
+      <DraftReviewWorkflow
+        draftText={content}
+        onDraftChange={setContent}
+        taskTitle={taskTitle}
         readOnly={status === "approved" || status === "pending_approval"}
+        showHandoff={status === "draft" || status === "needs_revisions"}
       />
+
       {(isNeedsRevisions || status === "draft") && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
@@ -875,9 +878,14 @@ export function TaskDetailView({ task, activity }: TaskDetailViewProps) {
 
         {/* ── Left: document + actions ─────────────────────────── */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-800">Document</h2>
+          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0087DC] text-[11px] font-bold text-white">
+                  ✓
+                </span>
+                <h2 className="text-sm font-semibold text-slate-800">Document</h2>
+              </div>
               {task.type === "content_draft" && task.content_draft && (
                 <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-600">
                   {task.content_draft.type === "press_release" ? "Press Release" : "Social Post"}
@@ -885,9 +893,11 @@ export function TaskDetailView({ task, activity }: TaskDetailViewProps) {
               )}
             </div>
 
+            <div className="p-5">
             {isEditable || isTerminal ? (
               <AuthorEditor
                 taskId={task.id}
+                taskTitle={task.title}
                 initialContent={currentContent}
                 currentVersion={task.version}
                 latestFeedback={task.latest_feedback}
@@ -895,14 +905,15 @@ export function TaskDetailView({ task, activity }: TaskDetailViewProps) {
                 onOptimisticUpdate={setOptimisticStatus}
               />
             ) : (
-              <Textarea
-                value={currentContent}
+              <DraftReviewWorkflow
+                draftText={currentContent}
+                onDraftChange={() => undefined}
+                taskTitle={task.title}
                 readOnly
-                rows={20}
-                className="resize-none font-mono text-sm leading-relaxed bg-slate-50 text-slate-700"
-                aria-label="Document content (read-only)"
+                showHandoff={false}
               />
             )}
+            </div>
           </div>
 
           {isReviewable && (

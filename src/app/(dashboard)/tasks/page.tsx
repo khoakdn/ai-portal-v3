@@ -1,9 +1,7 @@
 import { Suspense } from "react";
-import Link from "next/link";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { getTasksForBoard } from "@/actions/tasks/get-tasks";
 import { TaskBoard } from "@/components/tasks/task-board";
-import { Button } from "@/components/ui/button";
 
 async function TaskBoardFetcher() {
   const { tasks, error } = await getTasksForBoard();
@@ -13,19 +11,11 @@ async function TaskBoardFetcher() {
 export default function TasksPage() {
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tasks &amp; Approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Review AI-generated drafts and manage the approval workflow.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/content">
-            <Sparkles className="h-4 w-4" />
-            New Content
-          </Link>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Tasks &amp; Approvals</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review AI-generated drafts and manage the approval workflow.
+        </p>
       </div>
 
       <Suspense

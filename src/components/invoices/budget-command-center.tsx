@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -23,6 +24,9 @@ import {
   X,
 } from "lucide-react";
 import { extractInvoice } from "@/actions/invoices/extract-invoice";
+import { resetInvoicePlatformData } from "@/actions/invoices/reset-platform-data";
+import { reset2026InvoiceData } from "@/actions/invoices/reset-2026-invoice-data";
+import { buildDemoInvoiceDataset } from "@/lib/invoices/demo-invoice-dataset";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -38,8 +42,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  INITIAL_BUDGET_LINES,
-  MONTHLY_DATA,
   CATEGORY_COLORS,
   DEFAULT_ANNUAL_BUDGET_TOTAL,
   fmt, fmtFull,
@@ -47,13 +49,19 @@ import {
   getLinesForTimeframe,
   scaleBudgetLinesToAnnualTotal,
   scaleMonthlyBudgetData,
-  resetBudgetLinesToDefault,
   dateToQuarterIndex,
   type BudgetLine,
   type MonthlyDataPoint,
   type TimeframeTab,
   type ChartType,
 } from "@/lib/budget/data";
+import {
+  getDefaultMarketingBudgetSnapshot,
+  getZeroMarketingBudgetSnapshot,
+  loadMarketingBudgetSnapshot,
+  reset2026SpendingInSnapshot,
+  saveMarketingBudgetSnapshot,
+} from "@/lib/budget/storage";
 import type { InvoiceSchema } from "@/lib/invoices/schema";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,11 +354,68 @@ function CategoryTable({
   );
 }
 
+function isApprovedInvoiceStatus(status: UploadStatus | string): boolean {
+  return status.toLowerCase() === "approved";
+}
+
+function InvoiceMetricsStrip({
+  totalUploaded,
+  totalApproved,
+  totalPending,
+}: {
+  totalUploaded: number;
+  totalApproved: number;
+  totalPending: number;
+}) {
+  const items = [
+    {
+      label: "Total Invoices Uploaded",
+      value: totalUploaded,
+      accent: "border-[#0087DC]/20 bg-gradient-to-br from-blue-50/80 to-white",
+      valueClass: "text-[#0087DC]",
+    },
+    {
+      label: "Approved Invoices",
+      value: totalApproved,
+      accent: "border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white",
+      valueClass: "text-emerald-600",
+    },
+    {
+      label: "Pending Review",
+      value: totalPending,
+      accent: "border-amber-200/80 bg-gradient-to-br from-amber-50/80 to-white",
+      valueClass: "text-amber-700",
+    },
+  ] as const;
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className={cn(
+            "rounded-xl border px-4 py-3 shadow-sm",
+            item.accent
+          )}
+        >
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            {item.label}
+          </p>
+          <p className={cn("mt-1 text-2xl font-bold tabular-nums", item.valueClass)}>
+            {item.value}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Uploaded invoice history
 // ─────────────────────────────────────────────────────────────────────────────
 
 type UploadStatus = "extracting" | "ready" | "approved" | "error";
+type InvoiceStatusFilter = "all" | "approved" | "pending";
 
 interface UploadedInvoiceRecord {
   id: string;
@@ -376,13 +441,71 @@ function uploadStatusLabel(status: UploadStatus): string {
   }
 }
 
+function isInvoiceYear2026(record: UploadedInvoiceRecord): boolean {
+  const date = record.invoiceData?.invoiceDate;
+  if (!date) return true;
+  return date.startsWith("2026");
+}
+
+function InvoiceStatusFilterTabs({
+  statusFilter,
+  onStatusFilterChange,
+  totalCount,
+  approvedCount,
+  pendingCount,
+}: {
+  statusFilter: InvoiceStatusFilter;
+  onStatusFilterChange: (filter: InvoiceStatusFilter) => void;
+  totalCount: number;
+  approvedCount: number;
+  pendingCount: number;
+}) {
+  const tabs: { id: InvoiceStatusFilter; label: string; count: number }[] = [
+    { id: "all", label: "All Invoices", count: totalCount },
+    { id: "approved", label: "✅ Approved", count: approvedCount },
+    { id: "pending", label: "⏳ Pending Review", count: pendingCount },
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onStatusFilterChange(tab.id)}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-200",
+            statusFilter === tab.id
+              ? "bg-[#0087DC] text-white shadow-sm ring-1 ring-[#0087DC]/30"
+              : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+          )}
+        >
+          {tab.label} ({tab.count})
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function UploadedInvoicesList({
   records,
+  displayedRecords,
+  statusFilter,
+  onStatusFilterChange,
+  totalCount,
+  approvedCount,
+  pendingCount,
   activeId,
   onRemove,
   onSelect,
 }: {
   records: UploadedInvoiceRecord[];
+  displayedRecords: UploadedInvoiceRecord[];
+  statusFilter: InvoiceStatusFilter;
+  onStatusFilterChange: (filter: InvoiceStatusFilter) => void;
+  totalCount: number;
+  approvedCount: number;
+  pendingCount: number;
   activeId: string | null;
   onRemove: (id: string) => void;
   onSelect: (id: string) => void;
@@ -391,11 +514,23 @@ function UploadedInvoicesList({
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-100">
-      <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-2.5">
+      <div className="space-y-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-          Uploaded Invoices ({records.length})
+          Uploaded Invoices
         </p>
+        <InvoiceStatusFilterTabs
+          statusFilter={statusFilter}
+          onStatusFilterChange={onStatusFilterChange}
+          totalCount={totalCount}
+          approvedCount={approvedCount}
+          pendingCount={pendingCount}
+        />
       </div>
+      {displayedRecords.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-slate-400">
+          No invoices match this filter.
+        </p>
+      ) : (
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -406,7 +541,7 @@ function UploadedInvoicesList({
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-50">
-          {records.map((record) => (
+          {displayedRecords.map((record) => (
             <tr
               key={record.id}
               className={cn(
@@ -457,6 +592,7 @@ function UploadedInvoicesList({
           ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 }
@@ -538,13 +674,11 @@ function BudgetConfigDialog({
   onOpenChange,
   currentCeiling,
   onApply,
-  onReset,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentCeiling: number;
   onApply: (value: number) => void;
-  onReset: () => void;
 }) {
   const [inputValue, setInputValue] = useState(String(currentCeiling));
 
@@ -558,6 +692,10 @@ function BudgetConfigDialog({
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     onApply(parsed);
     onOpenChange(false);
+  }
+
+  function handleClearInput() {
+    setInputValue("");
   }
 
   return (
@@ -591,11 +729,11 @@ function BudgetConfigDialog({
           </p>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button type="button" variant="outline" onClick={onReset}>
+          <Button type="button" variant="outline" onClick={handleClearInput}>
             <RotateCcw className="h-4 w-4" />
-            Reset to Default
+            Clear &amp; Set New
           </Button>
-          <Button type="button" onClick={handleApply}>
+          <Button type="button" onClick={handleApply} disabled={!inputValue.trim()}>
             Save Budget
           </Button>
         </DialogFooter>
@@ -784,25 +922,51 @@ function ImpactBanner({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function BudgetCommandCenter() {
-  const [lines, setLines]               = useState<BudgetLine[]>(() =>
-    INITIAL_BUDGET_LINES.map((line) => ({
-      ...line,
-      quarterlyBudget: [...line.quarterlyBudget] as [number, number, number, number],
-      quarterlySpent: [...line.quarterlySpent] as [number, number, number, number],
-    }))
-  );
-  const [monthlyData, setMonthlyData]     = useState<MonthlyDataPoint[]>(MONTHLY_DATA);
-  const [annualCeiling, setAnnualCeiling] = useState(DEFAULT_ANNUAL_BUDGET_TOTAL);
+  const router = useRouter();
+  const [lines, setLines] = useState<BudgetLine[]>(() => {
+    const saved = loadMarketingBudgetSnapshot();
+    return saved?.lines ?? getDefaultMarketingBudgetSnapshot().lines;
+  });
+  const [monthlyData, setMonthlyData] = useState<MonthlyDataPoint[]>(() => {
+    const saved = loadMarketingBudgetSnapshot();
+    return saved?.monthlyData ?? getDefaultMarketingBudgetSnapshot().monthlyData;
+  });
+  const [annualCeiling, setAnnualCeiling] = useState(() => {
+    const saved = loadMarketingBudgetSnapshot();
+    return saved?.annualCeiling ?? getDefaultMarketingBudgetSnapshot().annualCeiling;
+  });
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
+  const [budgetHydrated, setBudgetHydrated] = useState(false);
   const [activeTab, setActiveTab]       = useState<TimeframeTab>("Q2");
   const [chartType, setChartType]       = useState<ChartType>("bar");
   const [pendingInvoice, setPendingInvoice] = useState<InvoiceSchema | null>(null);
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
   const [uploadedInvoices, setUploadedInvoices] = useState<UploadedInvoiceRecord[]>([]);
-  const [approvedCount, setApprovedCount] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>("all");
   const [, startUploadTransition] = useTransition();
+  const [isResetting, startResetTransition] = useTransition();
+  const [isResetting2026, startReset2026Transition] = useTransition();
 
   const metrics = getTimeframeMetrics(lines, activeTab);
+  const totalUploaded = uploadedInvoices.length;
+  const totalApproved = uploadedInvoices.filter((inv) =>
+    inv.status?.toLowerCase() === "approved"
+  ).length;
+  const totalPending = totalUploaded - totalApproved;
+  const displayedInvoices = uploadedInvoices.filter((inv) => {
+    if (statusFilter === "approved") return inv.status?.toLowerCase() === "approved";
+    if (statusFilter === "pending") return inv.status?.toLowerCase() !== "approved";
+    return true;
+  });
+
+  useEffect(() => {
+    setBudgetHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!budgetHydrated) return;
+    saveMarketingBudgetSnapshot({ annualCeiling, lines, monthlyData });
+  }, [annualCeiling, lines, monthlyData, budgetHydrated]);
 
   function handleUploadFile(file: File) {
     const id = crypto.randomUUID();
@@ -865,13 +1029,6 @@ export function BudgetCommandCenter() {
     setAnnualCeiling(newCeiling);
   }
 
-  function handleResetBudgetCeiling() {
-    setLines((prev) => resetBudgetLinesToDefault(prev));
-    setMonthlyData(MONTHLY_DATA);
-    setAnnualCeiling(DEFAULT_ANNUAL_BUDGET_TOTAL);
-    setBudgetDialogOpen(false);
-  }
-
   function handleApprove() {
     if (!pendingInvoice) return;
     const amount    = pendingInvoice.totalAmount ?? 0;
@@ -894,9 +1051,75 @@ export function BudgetCommandCenter() {
         prev.map((r) => (r.id === activeUploadId ? { ...r, status: "approved" as const } : r))
       );
     }
-    setApprovedCount((c) => c + 1);
     setPendingInvoice(null);
     setActiveUploadId(null);
+  }
+
+  function handleLoadDemoDataset() {
+    setUploadedInvoices(buildDemoInvoiceDataset());
+    setPendingInvoice(null);
+    setActiveUploadId(null);
+    setStatusFilter("all");
+  }
+
+  function handleMasterReset() {
+    if (
+      !window.confirm(
+        "Are you absolute sure you want to wipe all invoice data and reset the budget to 0?"
+      )
+    ) {
+      return;
+    }
+
+    startResetTransition(async () => {
+      const result = await resetInvoicePlatformData();
+      if (!result.success) {
+        window.alert(result.error ?? "Failed to reset platform data.");
+        return;
+      }
+
+      const zeroSnapshot = getZeroMarketingBudgetSnapshot();
+      setLines(zeroSnapshot.lines);
+      setMonthlyData(zeroSnapshot.monthlyData);
+      setAnnualCeiling(0);
+      setUploadedInvoices([]);
+      setPendingInvoice(null);
+      setActiveUploadId(null);
+      saveMarketingBudgetSnapshot(zeroSnapshot);
+    });
+  }
+
+  function handleReset2026Data() {
+    if (
+      !window.confirm(
+        "Are you sure you want to zero out the 2026 financial year metrics? This will clear all invoice items dated in 2026."
+      )
+    ) {
+      return;
+    }
+
+    startReset2026Transition(async () => {
+      const result = await reset2026InvoiceData();
+      if (!result.success) {
+        window.alert(result.error ?? "Failed to reset 2026 data.");
+        return;
+      }
+
+      const nextSnapshot = reset2026SpendingInSnapshot({
+        annualCeiling,
+        lines,
+        monthlyData,
+      });
+
+      setLines(nextSnapshot.lines);
+      setMonthlyData(nextSnapshot.monthlyData);
+      setUploadedInvoices((prev) => prev.filter((inv) => !isInvoiceYear2026(inv)));
+      setPendingInvoice(null);
+      setActiveUploadId(null);
+      setStatusFilter("all");
+      saveMarketingBudgetSnapshot(nextSnapshot);
+      router.refresh();
+    });
   }
 
   function handleDiscardPending() {
@@ -914,7 +1137,6 @@ export function BudgetCommandCenter() {
         onOpenChange={setBudgetDialogOpen}
         currentCeiling={annualCeiling}
         onApply={handleApplyBudgetCeiling}
-        onReset={handleResetBudgetCeiling}
       />
 
       {/* ── Hero metrics ──────────────────────────────────────────────── */}
@@ -922,16 +1144,57 @@ export function BudgetCommandCenter() {
         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
           FY 2026 · Annual ceiling {fmtFull(annualCeiling)}
         </p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setBudgetDialogOpen(true)}
-          className="gap-2"
-        >
-          <Settings2 className="h-3.5 w-3.5" />
-          Set / Reset Annual Budget
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setBudgetDialogOpen(true)}
+            className="gap-2"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            Set / Reset Annual Budget
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleReset2026Data}
+            disabled={isResetting2026}
+            className="gap-2 border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
+          >
+            {isResetting2026 ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RotateCcw className="h-3.5 w-3.5" />
+            )}
+            🔄 Reset 2026 Data
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleLoadDemoDataset}
+            className="gap-2 border-[#a7d33f]/50 text-[#3d6b0e] hover:bg-[#a7d33f]/10"
+          >
+            📥 Load Demo Dataset
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={handleMasterReset}
+            disabled={isResetting}
+            className="gap-2"
+          >
+            {isResetting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            Clear All Invoices &amp; Budgets
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -961,11 +1224,11 @@ export function BudgetCommandCenter() {
         />
         <MetricCard
           label="Invoices Approved"
-          value={String(approvedCount + 14)}
-          sub={`${approvedCount} in this session`}
+          value={String(totalApproved)}
+          sub={`${totalUploaded} uploaded total`}
           icon={Paperclip}
           accent="bg-violet-50 text-violet-600"
-          trend="up"
+          trend={totalApproved > 0 ? "up" : "neutral"}
         />
       </div>
 
@@ -1037,8 +1300,19 @@ export function BudgetCommandCenter() {
           </div>
           <div className="space-y-4 p-6">
             <InvoiceUploadZone onUploadFile={handleUploadFile} />
+            <InvoiceMetricsStrip
+              totalUploaded={totalUploaded}
+              totalApproved={totalApproved}
+              totalPending={totalPending}
+            />
             <UploadedInvoicesList
               records={uploadedInvoices}
+              displayedRecords={displayedInvoices}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              totalCount={totalUploaded}
+              approvedCount={totalApproved}
+              pendingCount={totalPending}
               activeId={activeUploadId}
               onRemove={handleRemoveUpload}
               onSelect={handleSelectUpload}
