@@ -29,7 +29,7 @@ import {
   Zap,
 } from "lucide-react";
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
-import { saveAsDraft, submitForApproval } from "@/actions/content/save-content-draft";
+import { saveAsDraft } from "@/actions/content/save-content-draft";
 import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import {
   requestDraftFromGenerateApi,
@@ -46,9 +46,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REVIEW_HANDOFF_REVIEWERS } from "@/components/shared/draft-review-workflow";
+import { REVIEW_HANDOFF_REVIEWERS, formatReviewerHandoffLabel } from "@/components/shared/draft-review-workflow";
 import {
   REVIEWER_FEEDBACK_MESSAGE,
+  MANAGER_APPROVAL_DELAY_MS,
+  MANAGER_APPROVAL_MESSAGE,
+  MANAGER_APPROVAL_SENDER,
   applyReviewerFeedbackFix,
   improveDemoDraft,
   MOCK_OPTIMIZE_DELAY_MS,
@@ -59,6 +62,7 @@ import {
 } from "@/lib/content/delta-business-units";
 import { useReviewerNotification } from "@/contexts/reviewer-notification-context";
 import { useRegisterReviewerApplyFix } from "@/hooks/use-register-reviewer-apply-fix";
+import { useOptimizeHighlight } from "@/hooks/use-optimize-highlight";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,12 +223,14 @@ function PressReleasePreview({
   onChange,
   isEditable,
   isGenerating,
+  highlightClassName,
 }: {
   title: string;
   body: string;
   onChange: (v: string) => void;
   isEditable: boolean;
   isGenerating: boolean;
+  highlightClassName?: string;
 }) {
   const today = new Date().toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
@@ -262,7 +268,10 @@ function PressReleasePreview({
             value={body}
             onChange={(e) => onChange(e.target.value)}
             aria-label="Press release content editor"
-            className="min-h-[320px] w-full resize-none bg-transparent font-mono text-[13px] leading-[1.85] text-slate-800 outline-none"
+            className={cn(
+              "min-h-[320px] w-full resize-none bg-transparent font-mono text-[13px] leading-[1.85] text-slate-800 outline-none",
+              highlightClassName
+            )}
           />
         ) : body ? (
           <p className="whitespace-pre-wrap font-mono text-[13px] leading-[1.85] text-slate-800">{body}</p>
@@ -747,11 +756,8 @@ interface ReviewPhaseProps {
   onDraftChange: (v: string) => void;
   onRegenerate: () => void;
   isSaving: boolean;
-  isSubmitting: boolean;
   saveError: string | null;
   onSaveAsDraft: () => void;
-  onSubmitForApproval: () => void;
-  // Basecamp broadcast sync
   isSyncing: boolean;
   syncSuccess: boolean;
   syncError: string | null;
@@ -759,28 +765,56 @@ interface ReviewPhaseProps {
   onFinalApproval: () => void;
   onOptimizeDraft: () => void;
   isOptimizing: boolean;
+  optimizeHighlightClassName: string;
   selectedReviewer: string;
   onReviewerChange: (value: string) => void;
+  showResubmitForApproval: boolean;
+  onResubmitForFinalApproval: () => void;
+  isResubmitting: boolean;
+  resubmitToast: string | null;
 }
 
 function ReviewPhase({
-  title, draftText,
-  onDraftChange, onRegenerate,
-  isSaving, isSubmitting, saveError,
-  onSaveAsDraft, onSubmitForApproval,
-  isSyncing, syncSuccess, syncError, syncResult, onFinalApproval,
+  title,
+  draftText,
+  onDraftChange,
+  onRegenerate,
+  isSaving,
+  saveError,
+  onSaveAsDraft,
+  isSyncing,
+  syncSuccess,
+  syncError,
+  syncResult,
+  onFinalApproval,
   onOptimizeDraft,
   isOptimizing,
+  optimizeHighlightClassName,
   selectedReviewer,
   onReviewerChange,
+  showResubmitForApproval,
+  onResubmitForFinalApproval,
+  isResubmitting,
+  resubmitToast,
 }: ReviewPhaseProps) {
   const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
-  const reviewerName =
-    REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer)?.name ??
-    REVIEW_HANDOFF_REVIEWERS[0].name;
+  const selectedEntry =
+    REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer) ??
+    REVIEW_HANDOFF_REVIEWERS[0];
+  const reviewerName = selectedEntry.name;
 
   return (
     <div className="space-y-5">
+      {resubmitToast && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {resubmitToast}
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white px-6 py-4 shadow-sm">
         <div className="flex items-center gap-3">
@@ -792,7 +826,7 @@ function ReviewPhase({
         </div>
         <button
           onClick={onRegenerate}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-all active:scale-[0.98]"
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-800 active:scale-[0.98]"
         >
           <RotateCcw className="h-3 w-3" />
           Start Over
@@ -804,12 +838,14 @@ function ReviewPhase({
         <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-7 py-4">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0087DC] text-[11px] font-bold text-white">✓</span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0087DC] text-[11px] font-bold text-white">
+                ✓
+              </span>
               <h2 className="text-sm font-semibold text-slate-800">Review &amp; Edit Draft</h2>
             </div>
             <span className="text-[11px] font-medium text-emerald-600">✓ Editable</span>
           </div>
-          <div className="p-5">
+          <div className={cn("p-5 transition-colors duration-1000", optimizeHighlightClassName)}>
             <PressReleasePreview
               title={title}
               body={draftText}
@@ -820,22 +856,45 @@ function ReviewPhase({
           </div>
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onOptimizeDraft}
-          disabled={isOptimizing || !draftText.trim()}
-          className="w-full border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
-        >
-          {isOptimizing ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Optimizing placeholders…
-            </>
-          ) : (
-            <>✨ Optimize with AI</>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onOptimizeDraft}
+            disabled={isOptimizing || !draftText.trim()}
+            className="flex-1 border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
+          >
+            {isOptimizing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Optimizing placeholders…
+              </>
+            ) : (
+              <>✨ Optimize with AI</>
+            )}
+          </Button>
+
+          {showResubmitForApproval && (
+            <Button
+              type="button"
+              onClick={onResubmitForFinalApproval}
+              disabled={isResubmitting || !draftText.trim()}
+              className="flex-1 bg-[#0087DC] font-semibold text-white hover:bg-[#0076c0]"
+            >
+              {isResubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Routing to manager…
+                </>
+              ) : (
+                <>
+                  <SendHorizonal className="mr-2 h-4 w-4" />
+                  Resubmit for Final Approval
+                </>
+              )}
+            </Button>
           )}
-        </Button>
+        </div>
 
         {/* Forward for verification — directly under draft */}
         <div className="rounded-2xl border border-[#a7d33f]/40 bg-gradient-to-br from-[#a7d33f]/8 to-white p-6 shadow-sm">
@@ -843,19 +902,19 @@ function ReviewPhase({
             Forward Draft for Verification
           </p>
           <p className="mt-1.5 text-sm text-slate-600">
-            Route this draft to a communications reviewer. Edit the draft above before assigning.
+            Route this draft to a reviewer or manager. Edit the draft above before assigning.
           </p>
 
           <div className="mt-4 space-y-2">
-            <Label htmlFor="press-release-reviewer-select">Assign reviewer</Label>
+            <Label htmlFor="press-release-reviewer-select">Assign to role</Label>
             <Select value={selectedReviewer} onValueChange={onReviewerChange}>
               <SelectTrigger id="press-release-reviewer-select">
-                <SelectValue placeholder="Select reviewer" />
+                <SelectValue placeholder="Select assignee" />
               </SelectTrigger>
               <SelectContent>
                 {REVIEW_HANDOFF_REVIEWERS.map((reviewer) => (
                   <SelectItem key={reviewer.id} value={reviewer.id}>
-                    {reviewer.name}
+                    {formatReviewerHandoffLabel(reviewer)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -896,13 +955,13 @@ function ReviewPhase({
           ) : (
             <button
               onClick={onFinalApproval}
-              disabled={isSaving || isSubmitting || isSyncing}
+              disabled={isSaving || isSyncing}
               className={cn(
                 "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-[#2d4a0a] shadow-sm",
                 "transition-all duration-200 active:scale-[0.99]",
                 "disabled:cursor-not-allowed disabled:opacity-60",
                 isSyncing
-                  ? "bg-[#a7d33f]/60 cursor-wait"
+                  ? "cursor-wait bg-[#a7d33f]/60"
                   : "bg-[#a7d33f] hover:bg-[#96bc38]"
               )}
             >
@@ -921,52 +980,47 @@ function ReviewPhase({
           )}
 
           {syncError && !syncSuccess && (
-            <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700" role="alert">
+            <div
+              className="mt-3 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700"
+              role="alert"
+            >
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {syncError}
             </div>
           )}
         </div>
 
-        {/* Secondary portal actions */}
+        {/* Save inside portal */}
         <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-slate-400">
             Or save inside the portal
           </p>
           {saveError && (
-            <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3.5 text-xs text-red-700" role="alert">
+            <div
+              className="mb-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3.5 text-xs text-red-700"
+              role="alert"
+            >
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {saveError}
             </div>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              onClick={onSaveAsDraft}
-              disabled={isSaving || isSubmitting}
-              className="group flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 transition-colors group-hover:bg-slate-200">
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : <Save className="h-4 w-4 text-slate-500" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-800">Save as Draft</p>
-                <p className="mt-0.5 text-xs text-slate-400">Keep editing later in Tasks</p>
-              </div>
-            </button>
-            <button
-              onClick={onSubmitForApproval}
-              disabled={isSaving || isSubmitting || isSyncing}
-              className="group flex items-center gap-4 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-blue-50/50 px-5 py-4 text-left transition-all duration-200 hover:from-blue-100 hover:to-blue-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0087DC] shadow-sm shadow-blue-200 transition-transform duration-150 group-hover:scale-105">
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <SendHorizonal className="h-4 w-4 text-white" />}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-blue-800">Submit for Approval</p>
-                <p className="mt-0.5 text-xs text-blue-500">Internal workflow queue</p>
-              </div>
-            </button>
-          </div>
+          <button
+            onClick={onSaveAsDraft}
+            disabled={isSaving}
+            className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 transition-colors group-hover:bg-slate-200">
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+              ) : (
+                <Save className="h-4 w-4 text-slate-500" />
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Save as Draft</p>
+              <p className="mt-0.5 text-xs text-slate-400">Keep editing later in Tasks</p>
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -997,24 +1051,32 @@ export function PressReleaseStudio() {
   const [selectedReviewer, setSelectedReviewer] = useState<string>(
     REVIEW_HANDOFF_REVIEWERS[0].id
   );
+  const [showResubmitForApproval, setShowResubmitForApproval] = useState(false);
+  const [resubmitToast, setResubmitToast] = useState<string | null>(null);
   const { addNotification, clearNotifications } = useReviewerNotification();
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const managerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftTextRef = useRef(draftText);
+  const { triggerHighlight, highlightClassName } = useOptimizeHighlight(1500);
+
+  draftTextRef.current = draftText;
 
   useRegisterReviewerApplyFix(() => {
-    if (!draftText.trim()) return;
-    setDraftText(
-      applyReviewerFeedbackFix(draftText, currentCtx?.businessUnit)
-    );
+    const current = draftTextRef.current;
+    if (!current.trim()) return;
+    setDraftText(applyReviewerFeedbackFix(current, currentCtx?.businessUnit));
+    setShowResubmitForApproval(true);
   }, phase === "review");
 
   const [isTriggering, startTrigger] = useTransition();
   const [isOptimizing, startOptimize] = useTransition();
-  const [isSaving,     startSave]    = useTransition();
-  const [isSubmitting, startSubmit]  = useTransition();
+  const [isSaving, startSave] = useTransition();
+  const [isResubmitting, startResubmit] = useTransition();
 
   useEffect(() => {
     return () => {
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
     };
   }, []);
 
@@ -1068,8 +1130,8 @@ export function PressReleaseStudio() {
     setTriggerError(null);
     startOptimize(async () => {
       await new Promise((resolve) => setTimeout(resolve, MOCK_OPTIMIZE_DELAY_MS));
-      const improved = improveDemoDraft(draftText, currentCtx?.businessUnit);
-      setDraftText(improved);
+      setDraftText(improveDemoDraft(draftText, currentCtx?.businessUnit));
+      triggerHighlight();
     });
   }
 
@@ -1093,28 +1155,22 @@ export function PressReleaseStudio() {
     });
   }
 
-  function handleSubmitForApproval() {
-    setSaveError(null);
-    startSubmit(async () => {
-      const result = await submitForApproval({
-        title: currentTitle,
-        bulletPoints: currentCtx?.thematicFocus ?? "",
-        contentType: "press_release",
-        generatedBody: draftText,
-        editedBody: draftText,
-      });
-      if (result.success && result.taskId) {
-        await createBasecampTodoFromClient({
-          title: currentTitle,
-          businessUnit: currentCtx?.businessUnit ?? DEFAULT_DELTA_BUSINESS_UNIT,
-          draftText,
-          contentPrefix: "Review Press Release Draft:",
+  function handleResubmitForFinalApproval() {
+    if (isResubmitting) return;
+
+    startResubmit(() => {
+      clearNotifications();
+      setResubmitToast("Revised draft resubmitted for final manager approval.");
+      if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
+
+      managerTimeoutRef.current = setTimeout(() => {
+        addNotification({
+          sender: MANAGER_APPROVAL_SENDER,
+          message: MANAGER_APPROVAL_MESSAGE,
         });
-        setSaved({ taskId: result.taskId, mode: "pending_approval" });
-        setPhase("saved");
-      } else {
-        setSaveError(result.error ?? "Failed to submit.");
-      }
+        setResubmitToast(null);
+        setShowResubmitForApproval(false);
+      }, MANAGER_APPROVAL_DELAY_MS);
     });
   }
 
@@ -1124,17 +1180,18 @@ export function PressReleaseStudio() {
     setIsSyncing(true);
     setSyncError(null);
     setSyncResult(null);
+    setShowResubmitForApproval(false);
 
-    const selectedAssignee =
-      REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer)?.name ??
-      "Bilyana Mihova";
+    const selectedEntry =
+      REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer) ??
+      REVIEW_HANDOFF_REVIEWERS[0];
 
     try {
       const data = await createBasecampTodoFromClient({
         title: currentTitle,
         businessUnit: currentCtx?.businessUnit ?? DEFAULT_DELTA_BUSINESS_UNIT,
         draftText,
-        contentPrefix: `Review Press Release Draft: (Reviewer: ${selectedAssignee})`,
+        contentPrefix: `Review Press Release Draft: (${selectedEntry.role}: ${selectedEntry.name})`,
       });
 
       if (data.success) {
@@ -1145,13 +1202,15 @@ export function PressReleaseStudio() {
         });
         setSyncSuccess(true);
 
-        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-        feedbackTimeoutRef.current = setTimeout(() => {
-          addNotification({
-            sender: selectedAssignee || "Bilyana Mihova",
-            message: REVIEWER_FEEDBACK_MESSAGE,
-          });
-        }, 4000);
+        if (selectedEntry.id === "bilyana") {
+          if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+          feedbackTimeoutRef.current = setTimeout(() => {
+            addNotification({
+              sender: selectedEntry.name,
+              message: REVIEWER_FEEDBACK_MESSAGE,
+            });
+          }, 4000);
+        }
       } else {
         setSyncError(data.error ?? "Basecamp sync failed. Please try again.");
       }
@@ -1175,8 +1234,11 @@ export function PressReleaseStudio() {
     setSyncSuccess(false);
     setSyncError(null);
     setSyncResult(null);
+    setShowResubmitForApproval(false);
+    setResubmitToast(null);
     clearNotifications();
     if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+    if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
   }
 
   // ── Saved (Gemini path) ────────────────────────────────────────────────
@@ -1236,10 +1298,8 @@ export function PressReleaseStudio() {
           onDraftChange={setDraftText}
           onRegenerate={handleStartOver}
           isSaving={isSaving}
-          isSubmitting={isSubmitting}
           saveError={saveError}
           onSaveAsDraft={handleSaveAsDraft}
-          onSubmitForApproval={handleSubmitForApproval}
           isSyncing={isSyncing}
           syncSuccess={syncSuccess}
           syncError={syncError}
@@ -1247,8 +1307,13 @@ export function PressReleaseStudio() {
           onFinalApproval={handleFinalApproval}
           onOptimizeDraft={handleOptimizeDraft}
           isOptimizing={isOptimizing}
+          optimizeHighlightClassName={highlightClassName}
           selectedReviewer={selectedReviewer}
           onReviewerChange={setSelectedReviewer}
+          showResubmitForApproval={showResubmitForApproval}
+          onResubmitForFinalApproval={handleResubmitForFinalApproval}
+          isResubmitting={isResubmitting}
+          resubmitToast={resubmitToast}
         />
       )}
     </div>

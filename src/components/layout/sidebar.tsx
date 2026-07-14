@@ -29,7 +29,7 @@ const TOP_NAV = [
 
 const MY_REQUEST_ITEMS = [
   { href: "/my-request/press-release", label: "Press Release",      icon: FileText },
-  { href: "/my-request/social-media",  label: "Social Media Posts", icon: Share2   },
+  { href: "/my-request/social-media",  label: "Social Media Post",  icon: Share2   },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

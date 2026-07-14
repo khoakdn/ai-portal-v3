@@ -182,13 +182,15 @@ export function AppHeader() {
                           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-600">
                             {item.message}
                           </p>
-                          <button
-                            type="button"
-                            onClick={() => handleFixDraft(item.id)}
-                            className="mt-2 text-xs font-semibold text-[#0087DC] transition-colors hover:text-[#005a94] hover:underline"
-                          >
-                            👉 Fix Draft
-                          </button>
+                          {!item.message.includes("Document Approved") && (
+                            <button
+                              type="button"
+                              onClick={() => handleFixDraft(item.id)}
+                              className="mt-2 text-xs font-semibold text-[#0087DC] transition-colors hover:text-[#005a94] hover:underline"
+                            >
+                              👉 Fix Draft
+                            </button>
+                          )}
                         </div>
                       </div>
                     </li>

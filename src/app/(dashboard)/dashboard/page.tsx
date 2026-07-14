@@ -12,7 +12,6 @@ import {
   TrendingUp,
   MessageSquare,
   CalendarDays,
-  BarChart3,
   ChevronRight,
   Zap,
 } from "lucide-react";
@@ -26,12 +25,12 @@ import { cn } from "@/lib/utils";
    § 1 — DELTANAV BENTO HERO  (two-column grid)
    ═══════════════════════════════════════════════════════════════ */
 
-import { ContentLifecyclePanel } from "@/components/dashboard/content-lifecycle-panel";
+import { VirtualWorkspaceAssistant } from "@/components/dashboard/virtual-workspace-assistant";
 
 const QUICK_LINKS = [
   {
     href:     "/my-request/press-release",
-    label:    "Press Release Studio",
+    label:    "Press Release",
     caption:  "Create & dispatch announcements",
     icon:     Newspaper,
     iconBg:   "bg-violet-50",
@@ -39,22 +38,22 @@ const QUICK_LINKS = [
     border:   "hover:border-violet-200",
   },
   {
-    href:     "/invoices",
-    label:    "Invoice Auditor",
-    caption:  "Upload & extract invoice data",
-    icon:     Receipt,
-    iconBg:   "bg-[#0087DC]/8",
+    href:     "/my-request/social-media",
+    label:    "Social Media Post",
+    caption:  "Draft LinkedIn-ready campaign copy",
+    icon:     Share2,
+    iconBg:   "bg-blue-50",
     iconColor:"text-[#0087DC]",
     border:   "hover:border-[#0087DC]/30",
   },
   {
     href:     "/invoices",
-    label:    "Budget Dashboard",
-    caption:  "Track spend vs. budget",
-    icon:     BarChart3,
-    iconBg:   "bg-[#a7d33f]/10",
-    iconColor:"text-[#4a7010]",
-    border:   "hover:border-[#a7d33f]/50",
+    label:    "Invoice Tracking & Budget",
+    caption:  "Audit invoices and monitor spend",
+    icon:     Receipt,
+    iconBg:   "bg-[#0087DC]/8",
+    iconColor:"text-[#0087DC]",
+    border:   "hover:border-[#0087DC]/30",
   },
 ] as const;
 
@@ -167,9 +166,9 @@ function DeltaNavHero({
         </div>
       </div>
 
-      {/* ══ RIGHT — Content lifecycle panel (8 / 12) ═══════════════ */}
+      {/* ══ RIGHT — Virtual workspace assistant (8 / 12) ═══════════════ */}
       <div className="pointer-events-auto relative z-10 lg:col-span-8">
-        <ContentLifecyclePanel />
+        <VirtualWorkspaceAssistant />
       </div>
 
     </div>

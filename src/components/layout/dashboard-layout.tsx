@@ -1,6 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { AppHeader } from "@/components/layout/app-header";
-import { FloatingCopilot } from "@/components/layout/floating-copilot";
+import { DashboardOnboardingAssistant } from "@/components/dashboard/dashboard-onboarding-assistant";
 import { ReviewerFeedbackNotification } from "@/components/shared/reviewer-feedback-notification";
 import { ReviewerNotificationProvider } from "@/contexts/reviewer-notification-context";
 
@@ -22,9 +22,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           </main>
         </div>
 
-        {/* Native DeltaPR workflow guide chat */}
-        <FloatingCopilot />
         <ReviewerFeedbackNotification />
+        <DashboardOnboardingAssistant />
       </div>
     </ReviewerNotificationProvider>
   );

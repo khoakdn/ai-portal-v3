@@ -45,6 +45,7 @@ import {
   CATEGORY_COLORS,
   DEFAULT_ANNUAL_BUDGET_TOTAL,
   fmt, fmtFull,
+  formatBudgetEur,
   getTimeframeMetrics,
   getLinesForTimeframe,
   scaleBudgetLinesToAnnualTotal,
@@ -58,8 +59,10 @@ import {
 import {
   getDefaultMarketingBudgetSnapshot,
   getZeroMarketingBudgetSnapshot,
+  loadAllocatedBudget,
   loadMarketingBudgetSnapshot,
   reset2026SpendingInSnapshot,
+  saveAllocatedBudget,
   saveMarketingBudgetSnapshot,
 } from "@/lib/budget/storage";
 import type { InvoiceSchema } from "@/lib/invoices/schema";
@@ -672,30 +675,25 @@ function InvoiceUploadZone({
 function BudgetConfigDialog({
   open,
   onOpenChange,
-  currentCeiling,
+  budget,
   onApply,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentCeiling: number;
+  budget: number;
   onApply: (value: number) => void;
 }) {
-  const [inputValue, setInputValue] = useState(String(currentCeiling));
+  const [draftBudget, setDraftBudget] = useState<number>(budget);
 
   function handleOpenChange(next: boolean) {
-    if (next) setInputValue(String(currentCeiling));
+    if (next) setDraftBudget(budget);
     onOpenChange(next);
   }
 
   function handleApply() {
-    const parsed = Number(inputValue.replace(/[,\s€$]/g, ""));
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    onApply(parsed);
+    const nextAmount = Number.isFinite(draftBudget) ? draftBudget : 0;
+    onApply(nextAmount);
     onOpenChange(false);
-  }
-
-  function handleClearInput() {
-    setInputValue("");
   }
 
   return (
@@ -712,28 +710,33 @@ function BudgetConfigDialog({
         </DialogHeader>
         <div className="space-y-2 py-2">
           <Label htmlFor="annual-budget-input" className="text-xs font-semibold text-slate-600">
-            Annual budget ceiling (USD)
+            Annual budget ceiling (EUR)
           </Label>
           <Input
             id="annual-budget-input"
             type="number"
-            min={1}
+            min={0}
             step={1000}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            value={draftBudget}
+            onChange={(e) => setDraftBudget(Number(e.target.value) || 0)}
             placeholder="e.g. 500000"
             className="font-mono text-lg"
           />
           <p className="text-[11px] text-slate-400">
-            Default: {fmtFull(DEFAULT_ANNUAL_BUDGET_TOTAL)} · Current: {fmtFull(currentCeiling)}
+            Default: {formatBudgetEur(DEFAULT_ANNUAL_BUDGET_TOTAL)} · Current:{" "}
+            {formatBudgetEur(budget)}
           </p>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button type="button" variant="outline" onClick={handleClearInput}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setDraftBudget(0)}
+          >
             <RotateCcw className="h-4 w-4" />
             Clear &amp; Set New
           </Button>
-          <Button type="button" onClick={handleApply} disabled={!inputValue.trim()}>
+          <Button type="button" onClick={handleApply}>
             Save Budget
           </Button>
         </DialogFooter>
@@ -931,10 +934,7 @@ export function BudgetCommandCenter() {
     const saved = loadMarketingBudgetSnapshot();
     return saved?.monthlyData ?? getDefaultMarketingBudgetSnapshot().monthlyData;
   });
-  const [annualCeiling, setAnnualCeiling] = useState(() => {
-    const saved = loadMarketingBudgetSnapshot();
-    return saved?.annualCeiling ?? getDefaultMarketingBudgetSnapshot().annualCeiling;
-  });
+  const [budget, setBudget] = useState<number>(0);
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
   const [budgetHydrated, setBudgetHydrated] = useState(false);
   const [activeTab, setActiveTab]       = useState<TimeframeTab>("Q2");
@@ -960,13 +960,28 @@ export function BudgetCommandCenter() {
   });
 
   useEffect(() => {
+    const snapshot = loadMarketingBudgetSnapshot();
+    const dedicatedBudget = loadAllocatedBudget();
+    const resolvedBudget =
+      dedicatedBudget ??
+      snapshot?.annualCeiling ??
+      getDefaultMarketingBudgetSnapshot().annualCeiling;
+
+    setBudget(resolvedBudget);
+
+    if (snapshot) {
+      setLines(snapshot.lines);
+      setMonthlyData(snapshot.monthlyData);
+    }
+
     setBudgetHydrated(true);
   }, []);
 
   useEffect(() => {
     if (!budgetHydrated) return;
-    saveMarketingBudgetSnapshot({ annualCeiling, lines, monthlyData });
-  }, [annualCeiling, lines, monthlyData, budgetHydrated]);
+    saveAllocatedBudget(budget);
+    saveMarketingBudgetSnapshot({ annualCeiling: budget, lines, monthlyData });
+  }, [budget, lines, monthlyData, budgetHydrated]);
 
   function handleUploadFile(file: File) {
     const id = crypto.randomUUID();
@@ -1022,11 +1037,37 @@ export function BudgetCommandCenter() {
     }
   }
 
-  function handleApplyBudgetCeiling(newCeiling: number) {
-    const factor = newCeiling / annualCeiling;
-    setLines((prev) => scaleBudgetLinesToAnnualTotal(prev, newCeiling));
-    setMonthlyData((prev) => scaleMonthlyBudgetData(prev, factor));
-    setAnnualCeiling(newCeiling);
+  function handleUpdateBudget(newAmount: number) {
+    const safeAmount = Number.isFinite(newAmount) ? Math.max(0, newAmount) : 0;
+
+    if (safeAmount === 0) {
+      const zeroSnapshot = getZeroMarketingBudgetSnapshot();
+      setLines(zeroSnapshot.lines);
+      setMonthlyData(zeroSnapshot.monthlyData);
+      setBudget(0);
+      return;
+    }
+
+    const currentLineTotal = lines.reduce((sum, line) => sum + line.annualBudget, 0);
+    const scaleBase =
+      budget > 0 ? budget : currentLineTotal > 0 ? currentLineTotal : DEFAULT_ANNUAL_BUDGET_TOTAL;
+    const factor = safeAmount / scaleBase;
+
+    const baseLines =
+      currentLineTotal > 0
+        ? lines
+        : getDefaultMarketingBudgetSnapshot().lines;
+
+    setLines(scaleBudgetLinesToAnnualTotal(baseLines, safeAmount));
+    setMonthlyData((prev) =>
+      scaleMonthlyBudgetData(
+        prev.some((point) => point.budgeted > 0)
+          ? prev
+          : getDefaultMarketingBudgetSnapshot().monthlyData,
+        factor
+      )
+    );
+    setBudget(safeAmount);
   }
 
   function handleApprove() {
@@ -1081,7 +1122,7 @@ export function BudgetCommandCenter() {
       const zeroSnapshot = getZeroMarketingBudgetSnapshot();
       setLines(zeroSnapshot.lines);
       setMonthlyData(zeroSnapshot.monthlyData);
-      setAnnualCeiling(0);
+      setBudget(0);
       setUploadedInvoices([]);
       setPendingInvoice(null);
       setActiveUploadId(null);
@@ -1106,7 +1147,7 @@ export function BudgetCommandCenter() {
       }
 
       const nextSnapshot = reset2026SpendingInSnapshot({
-        annualCeiling,
+        annualCeiling: budget,
         lines,
         monthlyData,
       });
@@ -1135,14 +1176,17 @@ export function BudgetCommandCenter() {
       <BudgetConfigDialog
         open={budgetDialogOpen}
         onOpenChange={setBudgetDialogOpen}
-        currentCeiling={annualCeiling}
-        onApply={handleApplyBudgetCeiling}
+        budget={budget}
+        onApply={handleUpdateBudget}
       />
 
       {/* ── Hero metrics ──────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
-          FY 2026 · Annual ceiling {fmtFull(annualCeiling)}
+          FY 2026 · Allocated budget{" "}
+          {new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" }).format(
+            budget
+          )}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -1199,9 +1243,9 @@ export function BudgetCommandCenter() {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
-          label="Total Budget"
-          value={fmt(metrics.budgeted)}
-          sub={`${activeTab} allocation`}
+          label="Allocated Budget"
+          value={formatBudgetEur(budget)}
+          sub="FY 2026 ceiling"
           icon={DollarSign}
           accent="bg-blue-50 text-[#0087DC]"
           trend="neutral"
@@ -1217,7 +1261,7 @@ export function BudgetCommandCenter() {
         <MetricCard
           label="Remaining"
           value={fmt(metrics.remaining)}
-          sub={`${100 - metrics.pct}% unspent`}
+          sub={`${100 - metrics.pct}% unspent · ${activeTab}`}
           icon={Wallet}
           accent="bg-slate-50 text-slate-500"
           trend="neutral"
@@ -1263,7 +1307,13 @@ export function BudgetCommandCenter() {
         />
         <div className="mt-2 flex justify-between text-[11px] text-slate-400">
           <span>Spent: {fmt(metrics.spent)}</span>
-          <span>Budget: {fmt(metrics.budgeted)}</span>
+          <span>
+            Allocated:{" "}
+            {new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" }).format(
+              budget
+            )}{" "}
+            · {activeTab}: {fmt(metrics.budgeted)}
+          </span>
         </div>
       </div>
 

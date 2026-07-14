@@ -181,6 +181,14 @@ export const fmt = (n: number) =>
 export const fmtFull = (n: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
+/** EUR formatter for allocated budget overview cards */
+export function formatBudgetEur(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "EUR",
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 /** Returns budgeted and spent totals for the selected timeframe */
 export function getTimeframeMetrics(
   lines: BudgetLine[],

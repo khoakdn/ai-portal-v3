@@ -5,6 +5,8 @@ import {
   MONTHLY_DATA,
 } from "@/lib/budget/data";
 
+export const ALLOCATED_BUDGET_STORAGE_KEY = "delta_allocated_budget";
+
 const STORAGE_KEY = "marketing_budget";
 
 export interface MarketingBudgetSnapshot {
@@ -54,6 +56,23 @@ function parseSnapshot(raw: string): MarketingBudgetSnapshot | null {
     };
   } catch {
     return null;
+  }
+}
+
+export function loadAllocatedBudget(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(ALLOCATED_BUDGET_STORAGE_KEY);
+  if (raw == null) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function saveAllocatedBudget(amount: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ALLOCATED_BUDGET_STORAGE_KEY, String(amount));
+  } catch (err) {
+    console.error("[delta_allocated_budget] Failed to persist allocated budget:", err);
   }
 }
 
