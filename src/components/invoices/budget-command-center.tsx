@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useEffect } from "react";
+import { useState, useTransition, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -26,7 +26,17 @@ import {
 import { extractInvoice } from "@/actions/invoices/extract-invoice";
 import { resetInvoicePlatformData } from "@/actions/invoices/reset-platform-data";
 import { reset2026InvoiceData } from "@/actions/invoices/reset-2026-invoice-data";
-import { buildDemoInvoiceDataset } from "@/lib/invoices/demo-invoice-dataset";
+import {
+  buildDemoInvoiceDataset,
+  type QuarterFilter,
+} from "@/lib/invoices/demo-invoice-dataset";
+import {
+  calculateInvoiceBudgetMetrics,
+  getRecordAmount,
+  getRecordQuarter,
+  isApprovedInvoiceRecord,
+  matchesQuarterFilter,
+} from "@/lib/invoices/invoice-budget-metrics";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -46,7 +56,6 @@ import {
   DEFAULT_ANNUAL_BUDGET_TOTAL,
   fmt, fmtFull,
   formatBudgetEur,
-  getTimeframeMetrics,
   getLinesForTimeframe,
   scaleBudgetLinesToAnnualTotal,
   scaleMonthlyBudgetData,
@@ -79,7 +88,7 @@ const fmtAxis = (v: number) =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 function MetricCard({
-  label, value, sub, icon: Icon, accent, trend,
+  label, value, sub, icon: Icon, accent, trend, alert,
 }: {
   label: string;
   value: string;
@@ -87,17 +96,29 @@ function MetricCard({
   icon: React.ElementType;
   accent: string;
   trend?: "up" | "down" | "neutral";
+  alert?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+    <div className={cn(
+      "flex flex-col gap-3 rounded-2xl border p-6 shadow-sm",
+      alert
+        ? "border-red-100 bg-red-50 text-red-700"
+        : "border-slate-100 bg-white"
+    )}>
       <div className="flex items-start justify-between">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+        <p className={cn(
+          "text-[11px] font-bold uppercase tracking-widest",
+          alert ? "text-red-500/80" : "text-slate-400"
+        )}>{label}</p>
         <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl", accent)}>
           <Icon className="h-4.5 w-4.5" />
         </div>
       </div>
       <div>
-        <p className="text-2xl font-bold tracking-tight text-slate-900">{value}</p>
+        <p className={cn(
+          "text-2xl font-bold tracking-tight",
+          alert ? "text-red-700" : "text-slate-900"
+        )}>{value}</p>
         {sub && (
           <p className={cn(
             "mt-1 flex items-center gap-1 text-xs font-medium",
@@ -357,10 +378,6 @@ function CategoryTable({
   );
 }
 
-function isApprovedInvoiceStatus(status: UploadStatus | string): boolean {
-  return status.toLowerCase() === "approved";
-}
-
 function InvoiceMetricsStrip({
   totalUploaded,
   totalApproved,
@@ -427,12 +444,50 @@ interface UploadedInvoiceRecord {
   status: UploadStatus;
   errorMessage?: string;
   invoiceData?: InvoiceSchema;
+  demoTitle?: string;
+  demoQuarter?: "Q1" | "Q2" | "Q3" | "Q4";
+  demoBusinessUnit?: string;
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+const QUARTER_FILTER_OPTIONS: { id: QuarterFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "Q1", label: "Q1" },
+  { id: "Q2", label: "Q2" },
+  { id: "Q3", label: "Q3" },
+  { id: "Q4", label: "Q4" },
+];
+
+function QuarterFilterBar({
+  value,
+  onChange,
+}: {
+  value: QuarterFilter;
+  onChange: (filter: QuarterFilter) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+        Filter by Quarter
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {QUARTER_FILTER_OPTIONS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-200",
+              value === option.id
+                ? "bg-[#0087DC] text-white shadow-sm ring-1 ring-[#0087DC]/30"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function uploadStatusLabel(status: UploadStatus): string {
@@ -495,6 +550,8 @@ function UploadedInvoicesList({
   displayedRecords,
   statusFilter,
   onStatusFilterChange,
+  quarterFilter,
+  onQuarterFilterChange,
   totalCount,
   approvedCount,
   pendingCount,
@@ -506,6 +563,8 @@ function UploadedInvoicesList({
   displayedRecords: UploadedInvoiceRecord[];
   statusFilter: InvoiceStatusFilter;
   onStatusFilterChange: (filter: InvoiceStatusFilter) => void;
+  quarterFilter: QuarterFilter;
+  onQuarterFilterChange: (filter: QuarterFilter) => void;
   totalCount: number;
   approvedCount: number;
   pendingCount: number;
@@ -521,6 +580,7 @@ function UploadedInvoicesList({
         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
           Uploaded Invoices
         </p>
+        <QuarterFilterBar value={quarterFilter} onChange={onQuarterFilterChange} />
         <InvoiceStatusFilterTabs
           statusFilter={statusFilter}
           onStatusFilterChange={onStatusFilterChange}
@@ -537,8 +597,10 @@ function UploadedInvoicesList({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-left text-[10px] font-bold uppercase tracking-widest text-slate-400">
-            <th className="px-4 py-2">File</th>
-            <th className="hidden px-3 py-2 sm:table-cell">Size</th>
+            <th className="px-4 py-2">Invoice</th>
+            <th className="hidden px-3 py-2 md:table-cell">Vendor</th>
+            <th className="px-3 py-2 text-right">Amount</th>
+            <th className="hidden px-3 py-2 sm:table-cell">Quarter</th>
             <th className="px-3 py-2">Status</th>
             <th className="px-4 py-2 text-right">Action</th>
           </tr>
@@ -556,11 +618,24 @@ function UploadedInvoicesList({
                 if (record.status === "ready" && record.invoiceData) onSelect(record.id);
               }}
             >
-              <td className="max-w-[160px] truncate px-4 py-2.5 font-medium text-slate-700">
-                {record.fileName}
+              <td className="max-w-[180px] px-4 py-2.5">
+                <p className="truncate font-medium text-slate-700">
+                  {record.demoTitle ??
+                    record.invoiceData?.lineItems?.[0]?.description ??
+                    record.fileName}
+                </p>
+                <p className="truncate text-[11px] text-slate-400">
+                  {record.invoiceData?.invoiceNumber ?? record.fileName}
+                </p>
               </td>
-              <td className="hidden px-3 py-2.5 text-xs text-slate-500 sm:table-cell">
-                {formatFileSize(record.fileSize)}
+              <td className="hidden max-w-[120px] truncate px-3 py-2.5 text-xs text-slate-600 md:table-cell">
+                {record.invoiceData?.vendorName ?? "—"}
+              </td>
+              <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-800">
+                {formatBudgetEur(getRecordAmount(record))}
+              </td>
+              <td className="hidden px-3 py-2.5 text-xs font-medium text-slate-500 sm:table-cell">
+                {getRecordQuarter(record)}
               </td>
               <td className="px-3 py-2.5">
                 <span className={cn(
@@ -762,7 +837,7 @@ function ImpactBanner({
   onApprove: () => void;
   onDiscard: () => void;
 }) {
-  const amount = invoice.totalAmount ?? 0;
+  const amount = Number(invoice.totalAmount ?? 0);
 
   // Find matching budget line
   const match = lines.find(
@@ -943,21 +1018,36 @@ export function BudgetCommandCenter() {
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
   const [uploadedInvoices, setUploadedInvoices] = useState<UploadedInvoiceRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>("all");
+  const [quarterFilter, setQuarterFilter] = useState<QuarterFilter>("all");
   const [, startUploadTransition] = useTransition();
   const [isResetting, startResetTransition] = useTransition();
   const [isResetting2026, startReset2026Transition] = useTransition();
 
-  const metrics = getTimeframeMetrics(lines, activeTab);
+  const invoiceMetrics = useMemo(
+    () =>
+      calculateInvoiceBudgetMetrics(
+        uploadedInvoices,
+        Number(budget || 0),
+        quarterFilter
+      ),
+    [uploadedInvoices, budget, quarterFilter]
+  );
+
   const totalUploaded = uploadedInvoices.length;
-  const totalApproved = uploadedInvoices.filter((inv) =>
-    inv.status?.toLowerCase() === "approved"
+  const totalApproved = uploadedInvoices.filter(isApprovedInvoiceRecord).length;
+  const totalPending = uploadedInvoices.filter(
+    (inv) => inv.status === "ready" || inv.status === "extracting"
   ).length;
-  const totalPending = totalUploaded - totalApproved;
+
   const displayedInvoices = uploadedInvoices.filter((inv) => {
-    if (statusFilter === "approved") return inv.status?.toLowerCase() === "approved";
-    if (statusFilter === "pending") return inv.status?.toLowerCase() !== "approved";
+    if (!matchesQuarterFilter(inv, quarterFilter)) return false;
+    if (statusFilter === "approved") return isApprovedInvoiceRecord(inv);
+    if (statusFilter === "pending") return !isApprovedInvoiceRecord(inv) && inv.status !== "error";
     return true;
   });
+
+  const quarterLabel = quarterFilter === "all" ? "All quarters" : quarterFilter;
+  const isBudgetOverrun = invoiceMetrics.remainingBalance < 0;
 
   useEffect(() => {
     const snapshot = loadMarketingBudgetSnapshot();
@@ -1072,8 +1162,8 @@ export function BudgetCommandCenter() {
 
   function handleApprove() {
     if (!pendingInvoice) return;
-    const amount    = pendingInvoice.totalAmount ?? 0;
-    const qIdx      = dateToQuarterIndex(pendingInvoice.invoiceDate);
+    const amount = Number(pendingInvoice.totalAmount ?? 0);
+    const qIdx = dateToQuarterIndex(pendingInvoice.invoiceDate);
 
     setLines((prev) =>
       prev.map((line) => {
@@ -1097,10 +1187,15 @@ export function BudgetCommandCenter() {
   }
 
   function handleLoadDemoDataset() {
-    setUploadedInvoices(buildDemoInvoiceDataset());
     setPendingInvoice(null);
     setActiveUploadId(null);
     setStatusFilter("all");
+    setQuarterFilter("all");
+    setUploadedInvoices(buildDemoInvoiceDataset());
+
+    if (Number(budget || 0) === 0) {
+      handleUpdateBudget(DEFAULT_ANNUAL_BUDGET_TOTAL);
+    }
   }
 
   function handleMasterReset() {
@@ -1158,6 +1253,7 @@ export function BudgetCommandCenter() {
       setPendingInvoice(null);
       setActiveUploadId(null);
       setStatusFilter("all");
+      setQuarterFilter("all");
       saveMarketingBudgetSnapshot(nextSnapshot);
       router.refresh();
     });
@@ -1221,7 +1317,7 @@ export function BudgetCommandCenter() {
             onClick={handleLoadDemoDataset}
             className="gap-2 border-[#a7d33f]/50 text-[#3d6b0e] hover:bg-[#a7d33f]/10"
           >
-            📥 Load Demo Dataset
+            ⚡ Load Demo Dataset
           </Button>
           <Button
             type="button"
@@ -1252,19 +1348,24 @@ export function BudgetCommandCenter() {
         />
         <MetricCard
           label="Total Spent"
-          value={fmt(metrics.spent)}
-          sub={`${metrics.pct}% of ${activeTab} budget`}
+          value={formatBudgetEur(invoiceMetrics.totalSpent)}
+          sub={`${invoiceMetrics.pct}% of allocated · ${quarterLabel} · approved only`}
           icon={TrendingUp}
-          accent={metrics.pct > 90 ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-600"}
-          trend={metrics.pct > 90 ? "down" : "up"}
+          accent={invoiceMetrics.pct > 90 ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-600"}
+          trend={invoiceMetrics.pct > 90 ? "down" : "up"}
         />
         <MetricCard
-          label="Remaining"
-          value={fmt(metrics.remaining)}
-          sub={`${100 - metrics.pct}% unspent · ${activeTab}`}
+          label="Remaining Budget"
+          value={formatBudgetEur(invoiceMetrics.remainingBalance)}
+          sub={
+            isBudgetOverrun
+              ? `Over budget by ${formatBudgetEur(Math.abs(invoiceMetrics.remainingBalance))} · ${quarterLabel}`
+              : `${100 - invoiceMetrics.pct}% unspent · ${quarterLabel}`
+          }
           icon={Wallet}
-          accent="bg-slate-50 text-slate-500"
-          trend="neutral"
+          accent={isBudgetOverrun ? "bg-red-100 text-red-600" : "bg-slate-50 text-slate-500"}
+          trend={isBudgetOverrun ? "down" : "neutral"}
+          alert={isBudgetOverrun}
         />
         <MetricCard
           label="Invoices Approved"
@@ -1291,28 +1392,39 @@ export function BudgetCommandCenter() {
       </Tabs>
 
       {/* ── Overall budget bar ─────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-slate-100 bg-white px-6 py-5 shadow-sm">
+      <div className={cn(
+        "rounded-2xl border px-6 py-5 shadow-sm",
+        isBudgetOverrun ? "border-red-100 bg-red-50/40" : "border-slate-100 bg-white"
+      )}>
+        <div className="mb-3">
+          <QuarterFilterBar value={quarterFilter} onChange={setQuarterFilter} />
+        </div>
         <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="font-semibold text-slate-700">Overall {activeTab} Budget Utilisation</span>
-          <span className={cn("font-bold tabular-nums", metrics.pct > 90 ? "text-red-500" : "text-slate-700")}>
-            {metrics.pct}%
+          <span className={cn("font-semibold", isBudgetOverrun ? "text-red-700" : "text-slate-700")}>
+            Invoice Spend vs Allocated Budget · {quarterLabel}
+          </span>
+          <span className={cn(
+            "font-bold tabular-nums",
+            invoiceMetrics.pct > 90 || isBudgetOverrun ? "text-red-500" : "text-slate-700"
+          )}>
+            {invoiceMetrics.pct}%
           </span>
         </div>
         <Progress
-          value={metrics.pct}
+          value={Math.min(100, invoiceMetrics.pct)}
           className="h-3"
           indicatorClassName={
-            metrics.pct >= 100 ? "bg-red-400" : metrics.pct >= 85 ? "bg-amber-400" : "bg-[#a7d33f]"
+            invoiceMetrics.pct >= 100 ? "bg-red-400" : invoiceMetrics.pct >= 85 ? "bg-amber-400" : "bg-[#a7d33f]"
           }
         />
         <div className="mt-2 flex justify-between text-[11px] text-slate-400">
-          <span>Spent: {fmt(metrics.spent)}</span>
+          <span>Spent: {formatBudgetEur(invoiceMetrics.totalSpent)}</span>
           <span>
-            Allocated:{" "}
-            {new Intl.NumberFormat("en-US", { style: "currency", currency: "EUR" }).format(
-              budget
-            )}{" "}
-            · {activeTab}: {fmt(metrics.budgeted)}
+            Remaining:{" "}
+            <span className={isBudgetOverrun ? "font-semibold text-red-600" : ""}>
+              {formatBudgetEur(invoiceMetrics.remainingBalance)}
+            </span>
+            {" · "}Allocated: {formatBudgetEur(Number(budget || 0))}
           </span>
         </div>
       </div>
@@ -1360,6 +1472,8 @@ export function BudgetCommandCenter() {
               displayedRecords={displayedInvoices}
               statusFilter={statusFilter}
               onStatusFilterChange={setStatusFilter}
+              quarterFilter={quarterFilter}
+              onQuarterFilterChange={setQuarterFilter}
               totalCount={totalUploaded}
               approvedCount={totalApproved}
               pendingCount={totalPending}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,17 +20,14 @@ import {
   Megaphone,
   RotateCcw,
   Save,
-  SendHorizonal,
   Sparkles,
   Star,
   Trophy,
-  UserCheck,
   Users,
   Zap,
 } from "lucide-react";
 import { generatePressRelease, type PressReleaseStructuredContext } from "@/actions/content/generate-press-release";
 import { saveAsDraft } from "@/actions/content/save-content-draft";
-import { createBasecampTodoFromClient } from "@/lib/integrations/create-basecamp-todo-client";
 import {
   requestDraftFromGenerateApi,
 } from "@/lib/integrations/request-generate-api";
@@ -46,13 +43,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REVIEW_HANDOFF_REVIEWERS, formatReviewerHandoffLabel } from "@/components/shared/draft-review-workflow";
+import { ContentPipelineWorkflow } from "@/components/shared/content-pipeline-workflow";
+import { usePressReleasePipeline } from "@/hooks/use-press-release-pipeline";
 import {
-  REVIEWER_FEEDBACK_MESSAGE,
-  MANAGER_APPROVAL_DELAY_MS,
-  MANAGER_APPROVAL_MESSAGE,
-  MANAGER_APPROVAL_SENDER,
-  applyReviewerFeedbackFix,
   improveDemoDraft,
   MOCK_OPTIMIZE_DELAY_MS,
 } from "@/lib/demo/generate-mock-draft";
@@ -60,9 +53,8 @@ import {
   DELTA_BUSINESS_UNITS,
   DEFAULT_DELTA_BUSINESS_UNIT,
 } from "@/lib/content/delta-business-units";
-import { useReviewerNotification } from "@/contexts/reviewer-notification-context";
-import { useRegisterReviewerApplyFix } from "@/hooks/use-register-reviewer-apply-fix";
 import { useOptimizeHighlight } from "@/hooks/use-optimize-highlight";
+import { clearPipelineState } from "@/lib/demo/press-release-pipeline-storage";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +143,27 @@ const REGIONS = ["Global", "EMEA", "APAC", "Americas", "DACH", "UK & Ireland", "
 const LANGUAGES = ["English", "German", "French", "Spanish", "Dutch", "Swedish", "Italian", "Portuguese"];
 const BUSINESS_UNITS = [...DELTA_BUSINESS_UNITS];
 const PRIORITIES = ["High", "Medium", "Low"];
+
+const SMARTER_E_DEMO_TEMPLATE = {
+  region: "DACH",
+  language: "English",
+  businessUnit: "EVS" as const,
+  priority: "High",
+  deadline: "2026-06-23",
+  thematicFocus:
+    "Delta is showcasing its cutting-edge UFC500 Ultra-Fast Charger (500kW) designed for heavy-duty passenger and commercial fleet electric vehicles. The exhibition highlights grid integration capabilities, ultra-high power density, and sustainable charging architectures.",
+  productsToAddress:
+    "UFC500 Ultra-Fast Charger (500 kW), Delta grid integration platform, sustainable charging architecture",
+  productDescription:
+    "The UFC500 Ultra-Fast Charger delivers up to 500 kW for heavy-duty passenger and commercial fleet EVs at The Smarter E Europe 2026 in Munich, Germany. The platform emphasizes grid integration, ultra-high power density, and sustainable charging architectures for next-generation e-mobility infrastructure.",
+  infoMaterialLinks: "",
+  contactPerson: "",
+  existingSystems: "",
+  testReports: "",
+};
+
+const SMARTER_E_TITLE_PLACEHOLDER =
+  "e.g. Delta Launches UFC500 Charger at Smarter E Europe 2026";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step tracker
@@ -401,10 +414,14 @@ function DetailedForm({
   triggerError,
   triggerDebugPayload,
 }: DetailedFormProps) {
+  const [demoFlash, setDemoFlash] = useState(false);
+
   const {
     register,
     handleSubmit,
     control,
+    reset,
+    setFocus,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -424,6 +441,21 @@ function DetailedForm({
       testReports: "",
     },
   });
+
+  function loadDemoTemplate() {
+    reset({
+      title: "",
+      ...SMARTER_E_DEMO_TEMPLATE,
+    });
+    setDemoFlash(true);
+    window.setTimeout(() => setDemoFlash(false), 1500);
+    window.setTimeout(() => setFocus("title"), 50);
+  }
+
+  const demoFlashClassName = cn(
+    "transition-colors duration-1000",
+    demoFlash && "bg-blue-50/80 ring-2 ring-[#0087DC]/25"
+  );
 
   function onSubmit(data: FormValues) {
     const ctx: PressReleaseStructuredContext = {
@@ -470,18 +502,27 @@ function DetailedForm({
       <div className="mx-auto max-w-3xl space-y-5">
 
           {/* ─ Basic Info ─ */}
-          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-            <SectionLabel>Basic Information</SectionLabel>
+          <div className={cn("rounded-2xl border border-slate-100 bg-white p-6 shadow-sm", demoFlashClassName)}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <SectionLabel>Basic Information</SectionLabel>
+              <button
+                type="button"
+                onClick={loadDemoTemplate}
+                className="border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-xs font-medium text-blue-600 transition rounded-lg hover:bg-blue-100"
+              >
+                ⚡ Load &apos;Smarter E 2026&apos; Demo Template
+              </button>
+            </div>
             <div className="space-y-4">
 
               {/* Title */}
               <div>
                 <Label htmlFor="pr-title" className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
-                  Article Title <span className="text-red-400">*</span>
+                  Announcement Title <span className="text-red-400">*</span>
                 </Label>
                 <Input
                   id="pr-title"
-                  placeholder="e.g. Delta Corp Announces New AI-Driven Solution for Smart Manufacturing"
+                  placeholder={SMARTER_E_TITLE_PLACEHOLDER}
                   {...register("title")}
                   className={cn(errors.title && "border-red-300 focus:border-red-400 focus:ring-red-100")}
                 />
@@ -594,7 +635,7 @@ function DetailedForm({
           </div>
 
           {/* ─ Content Brief ─ */}
-          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+          <div className={cn("rounded-2xl border border-slate-100 bg-white p-6 shadow-sm", demoFlashClassName)}>
             <SectionLabel>Content Brief</SectionLabel>
             <div className="space-y-4">
 
@@ -656,7 +697,7 @@ function DetailedForm({
           </div>
 
           {/* ─ Product Details ─ */}
-          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+          <div className={cn("rounded-2xl border border-slate-100 bg-white p-6 shadow-sm", demoFlashClassName)}>
             <SectionLabel>Product Details</SectionLabel>
             <div className="space-y-4">
 
@@ -744,11 +785,6 @@ function DetailedForm({
 // Review phase (after generation)
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface SyncResult {
-  todoId?: number;
-  appUrl?: string;
-  simulated?: boolean;
-}
 
 interface ReviewPhaseProps {
   title: string;
@@ -758,20 +794,10 @@ interface ReviewPhaseProps {
   isSaving: boolean;
   saveError: string | null;
   onSaveAsDraft: () => void;
-  isSyncing: boolean;
-  syncSuccess: boolean;
-  syncError: string | null;
-  syncResult: SyncResult | null;
-  onFinalApproval: () => void;
   onOptimizeDraft: () => void;
   isOptimizing: boolean;
   optimizeHighlightClassName: string;
-  selectedReviewer: string;
-  onReviewerChange: (value: string) => void;
-  showResubmitForApproval: boolean;
-  onResubmitForFinalApproval: () => void;
-  isResubmitting: boolean;
-  resubmitToast: string | null;
+  businessUnit?: string;
 }
 
 function ReviewPhase({
@@ -782,40 +808,20 @@ function ReviewPhase({
   isSaving,
   saveError,
   onSaveAsDraft,
-  isSyncing,
-  syncSuccess,
-  syncError,
-  syncResult,
-  onFinalApproval,
   onOptimizeDraft,
   isOptimizing,
   optimizeHighlightClassName,
-  selectedReviewer,
-  onReviewerChange,
-  showResubmitForApproval,
-  onResubmitForFinalApproval,
-  isResubmitting,
-  resubmitToast,
+  businessUnit,
 }: ReviewPhaseProps) {
+  const { isDispatched } = usePressReleasePipeline({
+    draftText,
+    title,
+    businessUnit,
+  });
   const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
-  const selectedEntry =
-    REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer) ??
-    REVIEW_HANDOFF_REVIEWERS[0];
-  const reviewerName = selectedEntry.name;
 
   return (
     <div className="space-y-5">
-      {resubmitToast && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          {resubmitToast}
-        </div>
-      )}
-
-      {/* Top bar */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white px-6 py-4 shadow-sm">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[12px] font-semibold text-emerald-700">
@@ -825,6 +831,7 @@ function ReviewPhase({
           <span className="text-sm text-slate-500">{wordCount} words</span>
         </div>
         <button
+          type="button"
           onClick={onRegenerate}
           className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-800 active:scale-[0.98]"
         >
@@ -834,7 +841,6 @@ function ReviewPhase({
       </div>
 
       <div className="space-y-6">
-        {/* Preview */}
         <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-7 py-4">
             <div className="flex items-center gap-2.5">
@@ -843,154 +849,45 @@ function ReviewPhase({
               </span>
               <h2 className="text-sm font-semibold text-slate-800">Review &amp; Edit Draft</h2>
             </div>
-            <span className="text-[11px] font-medium text-emerald-600">✓ Editable</span>
+            <span className="text-[11px] font-medium text-emerald-600">
+              {isDispatched ? "Locked · Dispatched" : "✓ Editable"}
+            </span>
           </div>
           <div className={cn("p-5 transition-colors duration-1000", optimizeHighlightClassName)}>
             <PressReleasePreview
               title={title}
               body={draftText}
               onChange={onDraftChange}
-              isEditable={true}
+              isEditable={!isDispatched}
               isGenerating={false}
             />
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onOptimizeDraft}
-            disabled={isOptimizing || !draftText.trim()}
-            className="flex-1 border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
-          >
-            {isOptimizing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Optimizing placeholders…
-              </>
-            ) : (
-              <>✨ Optimize with AI</>
-            )}
-          </Button>
-
-          {showResubmitForApproval && (
-            <Button
-              type="button"
-              onClick={onResubmitForFinalApproval}
-              disabled={isResubmitting || !draftText.trim()}
-              className="flex-1 bg-[#0087DC] font-semibold text-white hover:bg-[#0076c0]"
-            >
-              {isResubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Routing to manager…
-                </>
-              ) : (
-                <>
-                  <SendHorizonal className="mr-2 h-4 w-4" />
-                  Resubmit for Final Approval
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-
-        {/* Forward for verification — directly under draft */}
-        <div className="rounded-2xl border border-[#a7d33f]/40 bg-gradient-to-br from-[#a7d33f]/8 to-white p-6 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-[#5a8a14]">
-            Forward Draft for Verification
-          </p>
-          <p className="mt-1.5 text-sm text-slate-600">
-            Route this draft to a reviewer or manager. Edit the draft above before assigning.
-          </p>
-
-          <div className="mt-4 space-y-2">
-            <Label htmlFor="press-release-reviewer-select">Assign to role</Label>
-            <Select value={selectedReviewer} onValueChange={onReviewerChange}>
-              <SelectTrigger id="press-release-reviewer-select">
-                <SelectValue placeholder="Select assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                {REVIEW_HANDOFF_REVIEWERS.map((reviewer) => (
-                  <SelectItem key={reviewer.id} value={reviewer.id}>
-                    {formatReviewerHandoffLabel(reviewer)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {syncSuccess && syncResult ? (
-            <div className="mt-4 overflow-hidden rounded-xl border border-[#a7d33f]/50 bg-[#a7d33f]/10">
-              <div className="flex items-center gap-3 px-5 py-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#a7d33f] shadow-sm">
-                  <CheckCircle2 className="h-5 w-5 text-white" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-[#3d6b0e]">
-                    Task Dispatched — assigned to {reviewerName} on Basecamp!
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-[#5a8a14]">
-                    {syncResult.simulated
-                      ? "Simulation — set BASECAMP_REFRESH_TOKEN to go live"
-                      : `Todo #${syncResult.todoId} · push notification sent`}
-                  </p>
-                </div>
-              </div>
-              {syncResult.appUrl && !syncResult.simulated && (
-                <div className="border-t border-[#a7d33f]/30 px-5 py-2.5">
-                  <a
-                    href={syncResult.appUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0087DC] hover:underline"
-                  >
-                    View in Basecamp
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </a>
-                </div>
-              )}
-            </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onOptimizeDraft}
+          disabled={isOptimizing || !draftText.trim() || isDispatched}
+          className="w-full border-[#0087DC]/30 text-[#005a94] hover:bg-[#0087DC]/5"
+        >
+          {isOptimizing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Optimizing placeholders…
+            </>
           ) : (
-            <button
-              onClick={onFinalApproval}
-              disabled={isSaving || isSyncing}
-              className={cn(
-                "mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-semibold text-[#2d4a0a] shadow-sm",
-                "transition-all duration-200 active:scale-[0.99]",
-                "disabled:cursor-not-allowed disabled:opacity-60",
-                isSyncing
-                  ? "cursor-wait bg-[#a7d33f]/60"
-                  : "bg-[#a7d33f] hover:bg-[#96bc38]"
-              )}
-            >
-              {isSyncing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Assigning to Basecamp…
-                </>
-              ) : (
-                <>
-                  <UserCheck className="h-4 w-4" />
-                  Assign for Review
-                </>
-              )}
-            </button>
+            <>✨ Optimize with AI</>
           )}
+        </Button>
 
-          {syncError && !syncSuccess && (
-            <div
-              className="mt-3 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-xs text-red-700"
-              role="alert"
-            >
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {syncError}
-            </div>
-          )}
-        </div>
+        <ContentPipelineWorkflow
+          draftText={draftText}
+          onDraftChange={onDraftChange}
+          title={title}
+          businessUnit={businessUnit}
+        />
 
-        {/* Save inside portal */}
         <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-slate-400">
             Or save inside the portal
@@ -1005,6 +902,7 @@ function ReviewPhase({
             </div>
           )}
           <button
+            type="button"
             onClick={onSaveAsDraft}
             disabled={isSaving}
             className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
@@ -1041,44 +939,12 @@ export function PressReleaseStudio() {
 
   const [draftText, setDraftText]       = useState("");
   const [saveError, setSaveError]     = useState<string | null>(null);
-
-  // Basecamp broadcast sync
-  const [isSyncing, setIsSyncing]     = useState(false);
-  const [syncSuccess, setSyncSuccess] = useState(false);
-  const [syncError, setSyncError]     = useState<string | null>(null);
-  const [syncResult, setSyncResult]   = useState<SyncResult | null>(null);
   const [saved, setSaved]           = useState<SavedState | null>(null);
-  const [selectedReviewer, setSelectedReviewer] = useState<string>(
-    REVIEW_HANDOFF_REVIEWERS[0].id
-  );
-  const [showResubmitForApproval, setShowResubmitForApproval] = useState(false);
-  const [resubmitToast, setResubmitToast] = useState<string | null>(null);
-  const { addNotification, clearNotifications } = useReviewerNotification();
-  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const managerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftTextRef = useRef(draftText);
   const { triggerHighlight, highlightClassName } = useOptimizeHighlight(1500);
-
-  draftTextRef.current = draftText;
-
-  useRegisterReviewerApplyFix(() => {
-    const current = draftTextRef.current;
-    if (!current.trim()) return;
-    setDraftText(applyReviewerFeedbackFix(current, currentCtx?.businessUnit));
-    setShowResubmitForApproval(true);
-  }, phase === "review");
 
   const [isTriggering, startTrigger] = useTransition();
   const [isOptimizing, startOptimize] = useTransition();
   const [isSaving, startSave] = useTransition();
-  const [isResubmitting, startResubmit] = useTransition();
-
-  useEffect(() => {
-    return () => {
-      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-      if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
-    };
-  }, []);
 
   function handleTypeSelect(type: PressReleaseType) {
     setSelectedType(type);
@@ -1155,73 +1021,8 @@ export function PressReleaseStudio() {
     });
   }
 
-  function handleResubmitForFinalApproval() {
-    if (isResubmitting) return;
-
-    startResubmit(() => {
-      clearNotifications();
-      setResubmitToast("Revised draft resubmitted for final manager approval.");
-      if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
-
-      managerTimeoutRef.current = setTimeout(() => {
-        addNotification({
-          sender: MANAGER_APPROVAL_SENDER,
-          message: MANAGER_APPROVAL_MESSAGE,
-        });
-        setResubmitToast(null);
-        setShowResubmitForApproval(false);
-      }, MANAGER_APPROVAL_DELAY_MS);
-    });
-  }
-
-  // ── Basecamp broadcast approval ────────────────────────────────────────
-  async function handleFinalApproval() {
-    if (isSyncing) return;
-    setIsSyncing(true);
-    setSyncError(null);
-    setSyncResult(null);
-    setShowResubmitForApproval(false);
-
-    const selectedEntry =
-      REVIEW_HANDOFF_REVIEWERS.find((r) => r.id === selectedReviewer) ??
-      REVIEW_HANDOFF_REVIEWERS[0];
-
-    try {
-      const data = await createBasecampTodoFromClient({
-        title: currentTitle,
-        businessUnit: currentCtx?.businessUnit ?? DEFAULT_DELTA_BUSINESS_UNIT,
-        draftText,
-        contentPrefix: `Review Press Release Draft: (${selectedEntry.role}: ${selectedEntry.name})`,
-      });
-
-      if (data.success) {
-        setSyncResult({
-          todoId: data.todoId,
-          appUrl: data.appUrl,
-          simulated: data.simulated,
-        });
-        setSyncSuccess(true);
-
-        if (selectedEntry.id === "bilyana") {
-          if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-          feedbackTimeoutRef.current = setTimeout(() => {
-            addNotification({
-              sender: selectedEntry.name,
-              message: REVIEWER_FEEDBACK_MESSAGE,
-            });
-          }, 4000);
-        }
-      } else {
-        setSyncError(data.error ?? "Basecamp sync failed. Please try again.");
-      }
-    } catch {
-      setSyncError("Network error — could not reach /api/basecamp/create-todo.");
-    } finally {
-      setIsSyncing(false);
-    }
-  }
-
   function handleStartOver() {
+    clearPipelineState();
     setPhase("select-type");
     setSelectedType(null);
     setCurrentTitle("");
@@ -1230,15 +1031,6 @@ export function PressReleaseStudio() {
     setTriggerError(null);
     setSaveError(null);
     setSaved(null);
-    setIsSyncing(false);
-    setSyncSuccess(false);
-    setSyncError(null);
-    setSyncResult(null);
-    setShowResubmitForApproval(false);
-    setResubmitToast(null);
-    clearNotifications();
-    if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-    if (managerTimeoutRef.current) clearTimeout(managerTimeoutRef.current);
   }
 
   // ── Saved (Gemini path) ────────────────────────────────────────────────
@@ -1300,20 +1092,10 @@ export function PressReleaseStudio() {
           isSaving={isSaving}
           saveError={saveError}
           onSaveAsDraft={handleSaveAsDraft}
-          isSyncing={isSyncing}
-          syncSuccess={syncSuccess}
-          syncError={syncError}
-          syncResult={syncResult}
-          onFinalApproval={handleFinalApproval}
           onOptimizeDraft={handleOptimizeDraft}
           isOptimizing={isOptimizing}
           optimizeHighlightClassName={highlightClassName}
-          selectedReviewer={selectedReviewer}
-          onReviewerChange={setSelectedReviewer}
-          showResubmitForApproval={showResubmitForApproval}
-          onResubmitForFinalApproval={handleResubmitForFinalApproval}
-          isResubmitting={isResubmitting}
-          resubmitToast={resubmitToast}
+          businessUnit={currentCtx?.businessUnit}
         />
       )}
     </div>

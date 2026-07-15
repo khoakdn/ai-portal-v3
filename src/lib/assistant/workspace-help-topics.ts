@@ -7,7 +7,7 @@ export interface HelpChip {
   steps: string;
 }
 
-export const DEMO_ASSISTANT_EMAIL = "denise.futterer@deltaww.com";
+export const DEMO_ASSISTANT_EMAIL = "fidan.musazade@deltaww.com";
 
 export const INLINE_TYPING_DELAY_MS = 600;
 
@@ -22,7 +22,8 @@ export const WORKSPACE_HELP_CHIPS: HelpChip[] = [
 2. Select your target corporate Business Unit acronym from the dropdown (ICTBG, EVS, IABG, BABG, EIBG, PSBG, CPBG, FMBG, or BMBU).
 3. Click "Send to AI Agent" to generate the draft and populate the review canvas.
 4. Run "✨ Optimize with AI" on the output — this patch tool auto-fills placeholders and removes layout brackets for a clean compliance-ready draft.
-5. Choose a reviewer from the handoff dropdown and click "Assign for Review" to route the release to your supervisor.`,
+5. Configure Bilyana Mihova (Feedback) and Fidan Musazade (Approval), then click "🚀 Dispatch Content Pipeline" to save and route your draft.
+6. Click "👁️ View Progress Tracker" to open the split-screen workflow view with live approval simulation.`,
   },
   {
     id: "social-media",

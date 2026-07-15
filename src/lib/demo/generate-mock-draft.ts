@@ -70,7 +70,7 @@ export function improveDemoDraft(text: string, businessUnit?: string): string {
 export const REVIEWER_FEEDBACK_MESSAGE =
   "Great draft on the UFC500! Can we optimize the executive quote section to make it sound punchier and place more emphasis on the compact, space-saving layout?";
 
-export const MANAGER_APPROVAL_SENDER = "Denise Futterer (Manager)";
+export const MANAGER_APPROVAL_SENDER = "Fidan Musazade (Manager)";
 
 export const MANAGER_APPROVAL_MESSAGE =
   "✅ Document Approved! The revised layout and corporate business unit alignment look excellent. Ready for public distribution.";

@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
         hostname: "www.delta-emea.com",
         pathname: "/images/**",
       },
+      {
+        protocol: "https",
+        hostname: "filecenter.deltaww.com",
+        pathname: "/news/images/**",
+      },
     ],
   },
 };

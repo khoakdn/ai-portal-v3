@@ -683,13 +683,10 @@ function ReviewerActionBar({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AuthorEditor({
-  taskId,
   taskTitle,
   initialContent,
-  currentVersion,
   latestFeedback,
   status,
-  onOptimisticUpdate,
 }: {
   taskId: string;
   taskTitle: string;
@@ -699,49 +696,8 @@ function AuthorEditor({
   status: TaskStatus;
   onOptimisticUpdate: (status: TaskStatus) => void;
 }) {
-  const [content, setContent]        = useState(initialContent);
-  const [isPending, startTransition] = useTransition();
-  const [success, setSuccess]        = useState(false);
-  const [error, setError]            = useState<string | null>(null);
-
-  const nextVersion      = currentVersion + 1;
+  const [content, setContent] = useState(initialContent);
   const isNeedsRevisions = status === "needs_revisions";
-
-  function handleResubmit() {
-    setError(null);
-    startTransition(async () => {
-      onOptimisticUpdate("pending_approval");
-      const result = await resubmitTask({ taskId, content });
-      if (result.success) {
-        setSuccess(true);
-      } else {
-        setError(result.error ?? "Resubmission failed. Please try again.");
-        onOptimisticUpdate(status);
-      }
-    });
-  }
-
-  function handleSubmitDraft() {
-    setError(null);
-    startTransition(async () => {
-      onOptimisticUpdate("pending_approval");
-      const result = await updateTaskStatus({ taskId, status: "pending_approval" });
-      if (!result.success) {
-        setError(result.error ?? "Submission failed.");
-        onOptimisticUpdate("draft");
-      }
-    });
-  }
-
-  if (success) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 py-12 text-center">
-        <CheckCircle2 className="mb-3 h-10 w-10 text-emerald-500" />
-        <p className="font-semibold text-emerald-800">Resubmitted for review</p>
-        <p className="mt-1 text-sm text-emerald-600">Version {nextVersion} is now pending approval.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -752,9 +708,6 @@ function AuthorEditor({
           <AlertDescription className="text-orange-700">{latestFeedback}</AlertDescription>
         </Alert>
       )}
-      {error && (
-        <p className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</p>
-      )}
 
       <DraftReviewWorkflow
         draftText={content}
@@ -763,27 +716,6 @@ function AuthorEditor({
         readOnly={status === "approved" || status === "pending_approval"}
         showHandoff={status === "draft" || status === "needs_revisions"}
       />
-
-      {(isNeedsRevisions || status === "draft") && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            {isNeedsRevisions
-              ? `Revising v${currentVersion} — submission will become v${nextVersion}`
-              : "Ready to submit for review?"}
-          </p>
-          {isNeedsRevisions ? (
-            <Button onClick={handleResubmit} disabled={isPending || !content.trim()}>
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Resubmit for Approval (v{nextVersion})
-            </Button>
-          ) : (
-            <Button onClick={handleSubmitDraft} disabled={isPending} variant="outline">
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Submit for Approval
-            </Button>
-          )}
-        </div>
-      )}
     </div>
   );
 }

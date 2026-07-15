@@ -1,11 +1,11 @@
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { getTasksForBoard } from "@/actions/tasks/get-tasks";
-import { TaskBoard } from "@/components/tasks/task-board";
+import { TasksPageClient } from "@/components/tasks/tasks-page-client";
 
 async function TaskBoardFetcher() {
   const { tasks, error } = await getTasksForBoard();
-  return <TaskBoard initialTasks={tasks} fetchError={error} />;
+  return <TasksPageClient initialTasks={tasks} fetchError={error} />;
 }
 
 export default function TasksPage() {
