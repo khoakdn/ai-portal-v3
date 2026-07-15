@@ -9,6 +9,11 @@ import {
   pipelineStatusLabel,
   type PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
+import {
+  formatDeadlineDateTime,
+  getAssigneeInitials,
+  type PipelineFeedbackEntry,
+} from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
 import { usePressReleasePipeline } from "@/hooks/use-press-release-pipeline";
 import { useOptimizeHighlight } from "@/hooks/use-optimize-highlight";
@@ -31,6 +36,135 @@ function StatusBadge({ status }: { status: PipelineStepStatus }) {
   );
 }
 
+function DeadlineBadge({ dueAt }: { dueAt: number | null }) {
+  if (!dueAt) return null;
+  return (
+    <span className="mt-2 inline-flex text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+      Deadline: {formatDeadlineDateTime(dueAt)}
+    </span>
+  );
+}
+
+function ActionLogLine({
+  icon,
+  label,
+  timestamp,
+  tone = "neutral",
+}: {
+  icon: string;
+  label: string;
+  timestamp: string;
+  tone?: "neutral" | "success";
+}) {
+  return (
+    <p
+      className={cn(
+        "mt-2 text-xs italic",
+        tone === "success" ? "text-emerald-700/90" : "text-slate-500"
+      )}
+    >
+      {icon} {label} on {timestamp}
+    </p>
+  );
+}
+
+function FeedbackLogCard({
+  entry,
+  managerFirstName,
+  isHistorical,
+  isApplyingFix,
+  draftLocked,
+  onToggle,
+  onApplyFix,
+}: {
+  entry: PipelineFeedbackEntry;
+  managerFirstName: string;
+  isHistorical: boolean;
+  isApplyingFix: boolean;
+  draftLocked: boolean;
+  onToggle: () => void;
+  onApplyFix: () => void;
+}) {
+  return (
+    <div className="mt-4 ml-[52px]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-left text-sm font-medium text-amber-900 transition hover:bg-amber-50"
+      >
+        <span>💬 View Feedback Details</span>
+        <span className="flex items-center gap-2">
+          {entry.resolved && (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+              Resolved
+            </span>
+          )}
+          {entry.expanded ? (
+            <ChevronUp className="h-4 w-4 shrink-0" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0" />
+          )}
+        </span>
+      </button>
+
+      {entry.expanded && (
+        <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-start gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0087DC]/10 text-xs font-bold text-[#0087DC]">
+              {getAssigneeInitials(entry.assigneeName)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">{entry.assigneeName}</p>
+              <p className="text-[11px] text-slate-500">Feedback Role · {entry.providedAt}</p>
+            </div>
+          </div>
+
+          <div className="space-y-3 px-4 py-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Feedback
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-slate-700">{entry.message}</p>
+            </div>
+
+            <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Audit History
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">{entry.auditNote}</p>
+            </div>
+
+            {entry.resolved && entry.resolvedAt && (
+              <p className="text-xs italic text-emerald-700">
+                ✅ Fix applied &amp; resubmitted on {entry.resolvedAt}
+              </p>
+            )}
+
+            {!isHistorical && !entry.resolved && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={onApplyFix}
+                disabled={isApplyingFix || draftLocked}
+                className="w-full bg-[#0087DC] hover:bg-[#0076c0]"
+              >
+                {isApplyingFix ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Applying fix…
+                  </>
+                ) : (
+                  <>⚡ Apply Fix &amp; Send to {managerFirstName}</>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ContentPipelineProgressViewProps {
   onDraftChange?: (value: string) => void;
   onSocialCopiesChange?: (copies: Record<SocialPlatform, string>) => void;
@@ -47,7 +181,7 @@ export function ContentPipelineProgressView({
     isHistorical,
     applyFixAndSendToManager,
     completeProcess,
-    setFeedbackExpanded,
+    toggleFeedbackLogEntry,
   } = usePressReleasePipeline();
   const { triggerHighlight, highlightClassName } = useOptimizeHighlight(1500);
   const [isApplyingFix, startApplyFix] = useTransition();
@@ -60,6 +194,7 @@ export function ContentPipelineProgressView({
   const reviewer = getPipelineAssignee(state.reviewerId);
   const manager = getPipelineAssignee(state.managerId);
   const managerFirstName = manager.name.split(" ")[0];
+  const reviewerFeedbackEntry = state.feedbackLog.find((entry) => entry.step === "reviewer");
 
   function handleApplyFix() {
     if (isApplyingFix || state.reviewerStatus !== "feedback_provided" || isHistorical) return;
@@ -175,6 +310,7 @@ export function ContentPipelineProgressView({
               {[reviewer, manager].map((person, index) => {
                 const isReviewer = index === 0;
                 const status = isReviewer ? state.reviewerStatus : state.managerStatus;
+                const dueAt = isReviewer ? state.reviewerDueAt : state.managerApprovalDueAt;
 
                 return (
                   <li
@@ -204,53 +340,58 @@ export function ContentPipelineProgressView({
                         <p className="mt-0.5 text-[11px] font-medium text-[#0087DC]">
                           {person.roleTag}
                         </p>
+                        <DeadlineBadge dueAt={dueAt} />
                         <div className="mt-2">
                           <StatusBadge status={status} />
                         </div>
+
+                        {isReviewer && state.feedbackProvidedAt && (
+                          <ActionLogLine
+                            icon="💬"
+                            label="Feedback submitted"
+                            timestamp={state.feedbackProvidedAt}
+                          />
+                        )}
+
+                        {isReviewer && state.reviewerApprovedAt && (
+                          <ActionLogLine
+                            icon="✅"
+                            label="Fix applied & resubmitted"
+                            timestamp={state.reviewerApprovedAt}
+                            tone="success"
+                          />
+                        )}
+
+                        {!isReviewer && state.managerApprovedAt && (
+                          <ActionLogLine
+                            icon="✅"
+                            label="Approved"
+                            timestamp={state.managerApprovedAt}
+                            tone="success"
+                          />
+                        )}
+
+                        {!isReviewer && state.completedAt && (
+                          <ActionLogLine
+                            icon="🎉"
+                            label="Process completed"
+                            timestamp={state.completedAt}
+                            tone="success"
+                          />
+                        )}
                       </div>
                     </div>
 
-                    {isReviewer && status === "feedback_provided" && (
-                      <div className="mt-4 ml-[52px]">
-                        <button
-                          type="button"
-                          onClick={() => setFeedbackExpanded(!state.feedbackExpanded)}
-                          className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-left text-sm font-medium text-amber-900"
-                        >
-                          Reviewer feedback
-                          {state.feedbackExpanded ? (
-                            <ChevronUp className="h-4 w-4 shrink-0" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4 shrink-0" />
-                          )}
-                        </button>
-
-                        {state.feedbackExpanded && (
-                          <div className="mt-2 space-y-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                            <p className="text-sm leading-relaxed text-slate-700">
-                              {state.feedbackText}
-                            </p>
-                            {!isHistorical && (
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={handleApplyFix}
-                                disabled={isApplyingFix || state.draftLocked}
-                                className="w-full bg-[#0087DC] hover:bg-[#0076c0]"
-                              >
-                                {isApplyingFix ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Applying fix…
-                                  </>
-                                ) : (
-                                  <>⚡ Apply Fix &amp; Send to {managerFirstName}</>
-                                )}
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                    {isReviewer && reviewerFeedbackEntry && (
+                      <FeedbackLogCard
+                        entry={reviewerFeedbackEntry}
+                        managerFirstName={managerFirstName}
+                        isHistorical={isHistorical}
+                        isApplyingFix={isApplyingFix}
+                        draftLocked={state.draftLocked}
+                        onToggle={() => toggleFeedbackLogEntry(reviewerFeedbackEntry.id)}
+                        onApplyFix={handleApplyFix}
+                      />
                     )}
                   </li>
                 );
@@ -282,6 +423,11 @@ export function ContentPipelineProgressView({
                 className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
               >
                 ✅ Approved — process complete and locked for reference.
+                {state.completedAt && (
+                  <span className="mt-1 block text-xs italic text-emerald-700/90">
+                    Completed on {state.completedAt}
+                  </span>
+                )}
               </p>
             )}
           </div>

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Eye, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock3, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +19,12 @@ import {
   getPipelineAssignee,
   type PipelineAssigneeId,
 } from "@/lib/demo/content-pipeline-simulator";
+import {
+  APPROVAL_SLA_OPTIONS,
+  FEEDBACK_SLA_OPTIONS,
+  computeDeadlineFromHours,
+  formatDeadlineDate,
+} from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
 import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
 import { usePressReleasePipeline } from "@/hooks/use-press-release-pipeline";
@@ -36,6 +42,27 @@ interface ContentPipelineWorkflowProps {
   disabled?: boolean;
   className?: string;
   onProgressViewOpen?: () => void;
+}
+
+function SlaDeadlineBadge({
+  label,
+  hours,
+  deadline,
+}: {
+  label: string;
+  hours: number;
+  deadline: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+      <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+        <Clock3 className="h-3.5 w-3.5 text-[#0087DC]" />
+        {hours}h SLA
+      </p>
+      <p className="mt-0.5 text-[11px] text-slate-500">Deadline: {deadline}</p>
+    </div>
+  );
 }
 
 export function ContentPipelineWorkflow({
@@ -64,6 +91,8 @@ export function ContentPipelineWorkflow({
     openProgressView,
     setReviewerId,
     setManagerId,
+    setReviewerSlaHours,
+    setManagerSlaHours,
     syncDraftMeta,
   } = usePressReleasePipeline({ draftText, title, businessUnit, taskType, feedbackText });
 
@@ -74,6 +103,22 @@ export function ContentPipelineWorkflow({
   const canDispatch =
     !disabled && !isDispatched && !isSplitViewActive && draftText.trim().length > 0;
 
+  const reviewerDeadlinePreview = useMemo(
+    () =>
+      formatDeadlineDate(
+        state.reviewerDueAt ?? computeDeadlineFromHours(state.reviewerSlaHours)
+      ),
+    [state.reviewerDueAt, state.reviewerSlaHours]
+  );
+
+  const managerDeadlinePreview = useMemo(
+    () =>
+      formatDeadlineDate(
+        state.managerApprovalDueAt ?? computeDeadlineFromHours(state.managerSlaHours)
+      ),
+    [state.managerApprovalDueAt, state.managerSlaHours]
+  );
+
   useEffect(() => {
     syncDraftMeta(draftText, title, businessUnit);
   }, [draftText, title, businessUnit, syncDraftMeta]);
@@ -83,7 +128,15 @@ export function ContentPipelineWorkflow({
       setReviewerId(defaults.reviewerId);
       setManagerId(defaults.managerId);
     }
-  }, [taskType, state.runStatus, state.taskId, defaults.reviewerId, defaults.managerId, setReviewerId, setManagerId]);
+  }, [
+    taskType,
+    state.runStatus,
+    state.taskId,
+    defaults.reviewerId,
+    defaults.managerId,
+    setReviewerId,
+    setManagerId,
+  ]);
 
   function handleDispatch() {
     if (!canDispatch || isDispatching) return;
@@ -99,6 +152,8 @@ export function ContentPipelineWorkflow({
         feedbackText,
         socialPlatform,
         socialCopies,
+        reviewerSlaHours: state.reviewerSlaHours,
+        managerSlaHours: state.managerSlaHours,
       });
     });
   }
@@ -133,6 +188,18 @@ export function ContentPipelineWorkflow({
             Saved to your Task Pipeline Board and routed to {reviewer.name} for feedback and{" "}
             {manager.name} for final approval.
           </p>
+          <div className="mt-4 grid w-full max-w-sm gap-2 text-left">
+            <SlaDeadlineBadge
+              label={`${reviewer.name} · Feedback`}
+              hours={state.reviewerSlaHours}
+              deadline={reviewerDeadlinePreview}
+            />
+            <SlaDeadlineBadge
+              label={`${manager.name} · Approval`}
+              hours={state.managerSlaHours}
+              deadline={managerDeadlinePreview}
+            />
+          </div>
           <Button
             type="button"
             onClick={handleViewProgress}
@@ -180,6 +247,29 @@ export function ContentPipelineWorkflow({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-slate-400">{reviewer.roleTag}</p>
+          <div className="space-y-2 pt-1">
+            <Label htmlFor="pipeline-reviewer-sla">Feedback SLA</Label>
+            <Select
+              value={String(state.reviewerSlaHours)}
+              onValueChange={(value) => setReviewerSlaHours(Number(value))}
+            >
+              <SelectTrigger id="pipeline-reviewer-sla">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FEEDBACK_SLA_OPTIONS.map((hours) => (
+                  <SelectItem key={`reviewer-sla-${hours}`} value={String(hours)}>
+                    {hours} hours
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <SlaDeadlineBadge
+              label="Feedback SLA"
+              hours={state.reviewerSlaHours}
+              deadline={reviewerDeadlinePreview}
+            />
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -200,6 +290,29 @@ export function ContentPipelineWorkflow({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-slate-400">{manager.roleTag}</p>
+          <div className="space-y-2 pt-1">
+            <Label htmlFor="pipeline-manager-sla">Approval SLA</Label>
+            <Select
+              value={String(state.managerSlaHours)}
+              onValueChange={(value) => setManagerSlaHours(Number(value))}
+            >
+              <SelectTrigger id="pipeline-manager-sla">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {APPROVAL_SLA_OPTIONS.map((hours) => (
+                  <SelectItem key={`manager-sla-${hours}`} value={String(hours)}>
+                    {hours} hours
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <SlaDeadlineBadge
+              label="Approval SLA"
+              hours={state.managerSlaHours}
+              deadline={managerDeadlinePreview}
+            />
+          </div>
         </div>
       </div>
 

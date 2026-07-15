@@ -5,6 +5,13 @@ import {
   type PipelineAssigneeId,
   type PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
+import {
+  DEFAULT_APPROVAL_SLA_HOURS,
+  DEFAULT_FEEDBACK_SLA_HOURS,
+  computeDeadlineFromHours,
+  createFeedbackLogEntry,
+  type PipelineFeedbackEntry,
+} from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
 
 export const WORKSPACE_TASKS_STORAGE_KEY = "delta_pr_tasks";
@@ -39,6 +46,15 @@ export interface WorkspaceTask {
   socialCopies?: Record<SocialPlatform, string>;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
+  reviewerSlaHours: number;
+  managerSlaHours: number;
+  reviewerDueAt: number | null;
+  managerApprovalDueAt: number | null;
+  feedbackProvidedAt: string | null;
+  reviewerApprovedAt: string | null;
+  managerApprovedAt: string | null;
+  completedAt: string | null;
+  feedbackLog: PipelineFeedbackEntry[];
   feedbackExpanded: boolean;
   showCompleteButton: boolean;
   draftLocked: boolean;
@@ -54,12 +70,17 @@ export function createWorkspaceTask(params: {
   managerId?: PipelineAssigneeId;
   socialPlatform?: SocialPlatform;
   socialCopies?: Record<SocialPlatform, string>;
+  reviewerSlaHours?: number;
+  managerSlaHours?: number;
 }): WorkspaceTask {
   const defaults = getDefaultAssigneesForTaskType(params.type);
   const reviewerId = params.reviewerId ?? defaults.reviewerId;
   const managerId = params.managerId ?? defaults.managerId;
   const reviewer = getPipelineAssignee(reviewerId);
   const manager = getPipelineAssignee(managerId);
+  const reviewerSlaHours = params.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS;
+  const managerSlaHours = params.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS;
+  const dispatchTime = Date.now();
 
   return {
     id: crypto.randomUUID(),
@@ -80,6 +101,15 @@ export function createWorkspaceTask(params: {
     socialCopies: params.socialCopies,
     simulationStartedAt: null,
     managerDueAt: null,
+    reviewerSlaHours,
+    managerSlaHours,
+    reviewerDueAt: computeDeadlineFromHours(reviewerSlaHours, dispatchTime),
+    managerApprovalDueAt: computeDeadlineFromHours(managerSlaHours, dispatchTime),
+    feedbackProvidedAt: null,
+    reviewerApprovedAt: null,
+    managerApprovedAt: null,
+    completedAt: null,
+    feedbackLog: [],
     feedbackExpanded: true,
     showCompleteButton: false,
     draftLocked: false,
@@ -197,6 +227,15 @@ export function syncWorkspaceTaskFromPipeline(params: {
   managerStatus: PipelineStepStatus;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
+  reviewerSlaHours: number;
+  managerSlaHours: number;
+  reviewerDueAt: number | null;
+  managerApprovalDueAt: number | null;
+  feedbackProvidedAt: string | null;
+  reviewerApprovedAt: string | null;
+  managerApprovedAt: string | null;
+  completedAt: string | null;
+  feedbackLog: PipelineFeedbackEntry[];
   feedbackExpanded: boolean;
   showCompleteButton: boolean;
   draftLocked: boolean;
@@ -219,6 +258,15 @@ export function syncWorkspaceTaskFromPipeline(params: {
     status,
     simulationStartedAt: params.simulationStartedAt,
     managerDueAt: params.managerDueAt,
+    reviewerSlaHours: params.reviewerSlaHours,
+    managerSlaHours: params.managerSlaHours,
+    reviewerDueAt: params.reviewerDueAt,
+    managerApprovalDueAt: params.managerApprovalDueAt,
+    feedbackProvidedAt: params.feedbackProvidedAt,
+    reviewerApprovedAt: params.reviewerApprovedAt,
+    managerApprovedAt: params.managerApprovedAt,
+    completedAt: params.completedAt,
+    feedbackLog: params.feedbackLog,
     feedbackExpanded: params.feedbackExpanded,
     showCompleteButton: params.showCompleteButton,
     draftLocked: params.draftLocked,
@@ -229,6 +277,32 @@ export function syncWorkspaceTaskFromPipeline(params: {
 export function workspaceTaskToPipelineFields(task: WorkspaceTask) {
   const simulationStarted = task.simulationStartedAt !== null;
   const reviewerApproved = task.reviewerStatus === "Approved";
+
+  const feedbackLog =
+    task.feedbackLog?.length > 0
+      ? task.feedbackLog
+      : task.reviewerStatus === "Feedback Provided" || task.feedbackProvidedAt
+        ? [
+            (() => {
+              const entry = createFeedbackLogEntry({
+                assigneeId: task.reviewerId,
+                assigneeName: task.reviewer,
+                message: task.feedbackText,
+                taskType: task.type,
+                providedAt: task.feedbackProvidedAt ?? undefined,
+              });
+              if (task.reviewerStatus === "Approved") {
+                return {
+                  ...entry,
+                  resolved: true,
+                  resolvedAt: task.reviewerApprovedAt ?? entry.providedAt,
+                  expanded: false,
+                };
+              }
+              return entry;
+            })(),
+          ]
+        : [];
 
   return {
     draftText: task.content,
@@ -250,6 +324,15 @@ export function workspaceTaskToPipelineFields(task: WorkspaceTask) {
     managerStatus: mapPipelineManagerStatus(task.managerStatus, reviewerApproved),
     simulationStartedAt: task.simulationStartedAt,
     managerDueAt: task.managerDueAt,
+    reviewerSlaHours: task.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS,
+    managerSlaHours: task.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS,
+    reviewerDueAt: task.reviewerDueAt ?? null,
+    managerApprovalDueAt: task.managerApprovalDueAt ?? null,
+    feedbackProvidedAt: task.feedbackProvidedAt ?? null,
+    reviewerApprovedAt: task.reviewerApprovedAt ?? null,
+    managerApprovedAt: task.managerApprovedAt ?? null,
+    completedAt: task.completedAt ?? null,
+    feedbackLog,
     feedbackExpanded: task.feedbackExpanded,
     showCompleteButton: task.showCompleteButton,
     draftLocked: task.draftLocked,

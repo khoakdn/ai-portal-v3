@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceTasks } from "@/hooks/use-workspace-tasks";
 import { usePressReleasePipeline } from "@/hooks/use-press-release-pipeline";
 import { ContentPipelineProgressView } from "@/components/shared/content-pipeline-progress-view";
+import { formatDeadlineDateTime } from "@/lib/demo/pipeline-tracking";
 import type { WorkspaceTask, WorkspaceTaskStatus } from "@/lib/demo/workspace-tasks-storage";
 
 function StatusBadge({ task }: { task: WorkspaceTask }) {
@@ -191,6 +192,31 @@ export function TaskPipelineBoard({ selectedTaskId, onSelectTask }: TaskPipeline
             </div>
 
             <StepIndicator task={task} />
+
+            <div className="mt-3 space-y-1.5 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5">
+              {task.reviewerDueAt && (
+                <p className="text-[11px] text-slate-600">
+                  <span className="font-semibold text-slate-700">Feedback deadline:</span>{" "}
+                  {formatDeadlineDateTime(task.reviewerDueAt)}
+                </p>
+              )}
+              {task.managerApprovalDueAt && (
+                <p className="text-[11px] text-slate-600">
+                  <span className="font-semibold text-slate-700">Approval deadline:</span>{" "}
+                  {formatDeadlineDateTime(task.managerApprovalDueAt)}
+                </p>
+              )}
+              {task.feedbackProvidedAt && (
+                <p className="text-[11px] italic text-slate-500">
+                  💬 Feedback logged · {task.feedbackProvidedAt}
+                </p>
+              )}
+              {task.managerApprovedAt && (
+                <p className="text-[11px] italic text-emerald-700/90">
+                  ✅ Approved · {task.managerApprovedAt}
+                </p>
+              )}
+            </div>
 
             <Button
               type="button"

@@ -10,10 +10,18 @@ import {
   PIPELINE_MANAGER_DELAY_MS,
   PIPELINE_REVIEWER_FEEDBACK,
   getDefaultAssigneesForTaskType,
+  getPipelineAssignee,
   type PipelineAssigneeId,
   type PipelineRunStatus,
   type PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
+import {
+  computeDeadlineFromHours,
+  createFeedbackLogEntry,
+  formatPipelineActionTimestamp,
+  DEFAULT_APPROVAL_SLA_HOURS,
+  DEFAULT_FEEDBACK_SLA_HOURS,
+} from "@/lib/demo/pipeline-tracking";
 import {
   DEFAULT_PIPELINE_STATE,
   loadPipelineState,
@@ -51,10 +59,27 @@ function reconcileSimulation(state: PressReleasePipelineState): PressReleasePipe
     next.simulationStartedAt !== null &&
     now >= next.simulationStartedAt + PIPELINE_FEEDBACK_DELAY_MS
   ) {
+    const timestamp = formatPipelineActionTimestamp(now);
+    const assignee = getPipelineAssignee(next.reviewerId);
+    const hasFeedbackEntry = next.feedbackLog.some((entry) => entry.step === "reviewer");
+
     next = {
       ...next,
       runStatus: "active",
       reviewerStatus: "feedback_provided",
+      feedbackProvidedAt: next.feedbackProvidedAt ?? timestamp,
+      feedbackLog: hasFeedbackEntry
+        ? next.feedbackLog
+        : [
+            ...next.feedbackLog,
+            createFeedbackLogEntry({
+              assigneeId: next.reviewerId,
+              assigneeName: assignee.name,
+              message: next.feedbackText,
+              taskType: next.taskType,
+              providedAt: timestamp,
+            }),
+          ],
     };
   }
 
@@ -67,6 +92,7 @@ function reconcileSimulation(state: PressReleasePipelineState): PressReleasePipe
       ...next,
       managerStatus: "approved",
       showCompleteButton: true,
+      managerApprovedAt: next.managerApprovedAt ?? formatPipelineActionTimestamp(now),
     };
   }
 
@@ -82,11 +108,28 @@ function syncTaskRecord(state: PressReleasePipelineState) {
     managerStatus: state.managerStatus,
     simulationStartedAt: state.simulationStartedAt,
     managerDueAt: state.managerDueAt,
+    reviewerSlaHours: state.reviewerSlaHours,
+    managerSlaHours: state.managerSlaHours,
+    reviewerDueAt: state.reviewerDueAt,
+    managerApprovalDueAt: state.managerApprovalDueAt,
+    feedbackProvidedAt: state.feedbackProvidedAt,
+    reviewerApprovedAt: state.reviewerApprovedAt,
+    managerApprovedAt: state.managerApprovedAt,
+    completedAt: state.completedAt,
+    feedbackLog: state.feedbackLog,
     feedbackExpanded: state.feedbackExpanded,
     showCompleteButton: state.showCompleteButton,
     draftLocked: state.draftLocked,
     socialCopies: state.socialCopies ?? undefined,
   });
+}
+
+function markReviewerFeedbackResolved(state: PressReleasePipelineState, resolvedAt: string) {
+  return state.feedbackLog.map((entry) =>
+    entry.step === "reviewer" && !entry.resolved
+      ? { ...entry, resolved: true, resolvedAt, expanded: false }
+      : entry
+  );
 }
 
 export function usePressReleasePipeline(options: UsePressReleasePipelineOptions = {}) {
@@ -141,10 +184,27 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
       feedbackTimeoutRef.current = setTimeout(() => {
         persist((prev) => {
           if (prev.reviewerStatus !== "processing") return prev;
+          const timestamp = formatPipelineActionTimestamp();
+          const assignee = getPipelineAssignee(prev.reviewerId);
+          const hasFeedbackEntry = prev.feedbackLog.some((entry) => entry.step === "reviewer");
+
           return {
             ...prev,
             runStatus: "active",
             reviewerStatus: "feedback_provided",
+            feedbackProvidedAt: timestamp,
+            feedbackLog: hasFeedbackEntry
+              ? prev.feedbackLog
+              : [
+                  ...prev.feedbackLog,
+                  createFeedbackLogEntry({
+                    assigneeId: prev.reviewerId,
+                    assigneeName: assignee.name,
+                    message: prev.feedbackText,
+                    taskType: prev.taskType,
+                    providedAt: timestamp,
+                  }),
+                ],
           };
         });
       }, remaining);
@@ -164,6 +224,7 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
             ...prev,
             managerStatus: "approved",
             showCompleteButton: true,
+            managerApprovedAt: formatPipelineActionTimestamp(),
           };
         });
       }, remaining);
@@ -248,7 +309,13 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
       feedbackText?: string;
       socialPlatform?: SocialPlatform;
       socialCopies?: Record<SocialPlatform, string>;
+      reviewerSlaHours?: number;
+      managerSlaHours?: number;
     }) => {
+      const reviewerSlaHours = params.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS;
+      const managerSlaHours = params.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS;
+      const dispatchTime = Date.now();
+
       const task = createWorkspaceTask({
         title: params.title,
         type: params.taskType ?? "Press Release",
@@ -259,6 +326,8 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
         managerId: params.managerId,
         socialPlatform: params.socialPlatform,
         socialCopies: params.socialCopies,
+        reviewerSlaHours,
+        managerSlaHours,
       });
       addWorkspaceTask(task);
       setActiveTaskId(task.id);
@@ -282,6 +351,15 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
         splitViewActive: false,
         simulationStartedAt: null,
         managerDueAt: null,
+        reviewerSlaHours,
+        managerSlaHours,
+        reviewerDueAt: computeDeadlineFromHours(reviewerSlaHours, dispatchTime),
+        managerApprovalDueAt: computeDeadlineFromHours(managerSlaHours, dispatchTime),
+        feedbackProvidedAt: null,
+        reviewerApprovedAt: null,
+        managerApprovedAt: null,
+        completedAt: null,
+        feedbackLog: [],
         socialPlatform: params.socialPlatform ?? null,
         socialCopies: params.socialCopies ?? null,
       }));
@@ -382,7 +460,8 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
           : applyReviewerFeedbackFix(current.draftText, current.businessUnit);
       onDraftChange?.(fixed);
 
-      const managerDueAt = Date.now() + PIPELINE_MANAGER_DELAY_MS;
+      const resolvedAt = formatPipelineActionTimestamp();
+      const managerSimDueAt = Date.now() + PIPELINE_MANAGER_DELAY_MS;
       const socialCopies =
         current.socialCopies && current.socialPlatform
           ? { ...current.socialCopies, [current.socialPlatform]: fixed }
@@ -395,9 +474,11 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
         reviewerStatus: "approved",
         managerStatus: "pending_final",
         feedbackExpanded: false,
-        managerDueAt,
+        reviewerApprovedAt: resolvedAt,
+        feedbackLog: markReviewerFeedbackResolved(prev, resolvedAt),
+        managerDueAt: managerSimDueAt,
       }));
-      scheduleManagerTimer(managerDueAt);
+      scheduleManagerTimer(managerSimDueAt);
     },
     [persist, scheduleManagerTimer]
   );
@@ -409,6 +490,7 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
       draftLocked: true,
       runStatus: "completed",
       showCompleteButton: false,
+      completedAt: formatPipelineActionTimestamp(),
     }));
   }, [addNotification, persist]);
 
@@ -428,8 +510,45 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
     [persist]
   );
 
+  const setReviewerSlaHours = useCallback(
+    (reviewerSlaHours: number) =>
+      persist((prev) => ({
+        ...prev,
+        reviewerSlaHours,
+        reviewerDueAt:
+          prev.runStatus === "idle" || prev.runStatus === "dispatched"
+            ? computeDeadlineFromHours(reviewerSlaHours)
+            : prev.reviewerDueAt,
+      })),
+    [persist]
+  );
+
+  const setManagerSlaHours = useCallback(
+    (managerSlaHours: number) =>
+      persist((prev) => ({
+        ...prev,
+        managerSlaHours,
+        managerApprovalDueAt:
+          prev.runStatus === "idle" || prev.runStatus === "dispatched"
+            ? computeDeadlineFromHours(managerSlaHours)
+            : prev.managerApprovalDueAt,
+      })),
+    [persist]
+  );
+
   const setFeedbackExpanded = useCallback(
     (feedbackExpanded: boolean) => persist((prev) => ({ ...prev, feedbackExpanded })),
+    [persist]
+  );
+
+  const toggleFeedbackLogEntry = useCallback(
+    (entryId: string) =>
+      persist((prev) => ({
+        ...prev,
+        feedbackLog: prev.feedbackLog.map((entry) =>
+          entry.id === entryId ? { ...entry, expanded: !entry.expanded } : entry
+        ),
+      })),
     [persist]
   );
 
@@ -452,7 +571,10 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
     completeProcess,
     setReviewerId,
     setManagerId,
+    setReviewerSlaHours,
+    setManagerSlaHours,
     setFeedbackExpanded,
+    toggleFeedbackLogEntry,
     updateDraftText,
     syncDraftMeta,
   };

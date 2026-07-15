@@ -3,8 +3,13 @@ import type {
   PipelineRunStatus,
   PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
-import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
+import type { PipelineFeedbackEntry } from "@/lib/demo/pipeline-tracking";
+import {
+  DEFAULT_APPROVAL_SLA_HOURS,
+  DEFAULT_FEEDBACK_SLA_HOURS,
+} from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
+import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
 
 export const PR_PIPELINE_STORAGE_KEY = "delta_pr_pipeline";
 
@@ -28,6 +33,15 @@ export interface PressReleasePipelineState {
   draftLocked: boolean;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
+  reviewerSlaHours: number;
+  managerSlaHours: number;
+  reviewerDueAt: number | null;
+  managerApprovalDueAt: number | null;
+  feedbackProvidedAt: string | null;
+  reviewerApprovedAt: string | null;
+  managerApprovedAt: string | null;
+  completedAt: string | null;
+  feedbackLog: PipelineFeedbackEntry[];
   socialPlatform: SocialPlatform | null;
   socialCopies: Record<SocialPlatform, string> | null;
   updatedAt: number;
@@ -51,6 +65,15 @@ export const DEFAULT_PIPELINE_STATE: PressReleasePipelineState = {
   draftLocked: false,
   simulationStartedAt: null,
   managerDueAt: null,
+  reviewerSlaHours: DEFAULT_FEEDBACK_SLA_HOURS,
+  managerSlaHours: DEFAULT_APPROVAL_SLA_HOURS,
+  reviewerDueAt: null,
+  managerApprovalDueAt: null,
+  feedbackProvidedAt: null,
+  reviewerApprovedAt: null,
+  managerApprovedAt: null,
+  completedAt: null,
+  feedbackLog: [],
   socialPlatform: null,
   socialCopies: null,
   updatedAt: 0,
