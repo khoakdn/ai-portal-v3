@@ -16,11 +16,11 @@ import {
   type PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
 import {
-  computeDeadlineFromHours,
-  createFeedbackLogEntry,
+  resolvePipelineDeadline,
   formatPipelineActionTimestamp,
-  DEFAULT_APPROVAL_SLA_HOURS,
-  DEFAULT_FEEDBACK_SLA_HOURS,
+  DEFAULT_APPROVAL_SLA_DAYS,
+  DEFAULT_FEEDBACK_SLA_DAYS,
+  createFeedbackLogEntry,
 } from "@/lib/demo/pipeline-tracking";
 import {
   DEFAULT_PIPELINE_STATE,
@@ -108,8 +108,10 @@ function syncTaskRecord(state: PressReleasePipelineState) {
     managerStatus: state.managerStatus,
     simulationStartedAt: state.simulationStartedAt,
     managerDueAt: state.managerDueAt,
-    reviewerSlaHours: state.reviewerSlaHours,
-    managerSlaHours: state.managerSlaHours,
+    reviewerSlaDays: state.reviewerSlaDays,
+    managerSlaDays: state.managerSlaDays,
+    reviewerDeadlineDate: state.reviewerDeadlineDate,
+    managerDeadlineDate: state.managerDeadlineDate,
     reviewerDueAt: state.reviewerDueAt,
     managerApprovalDueAt: state.managerApprovalDueAt,
     feedbackProvidedAt: state.feedbackProvidedAt,
@@ -309,11 +311,15 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
       feedbackText?: string;
       socialPlatform?: SocialPlatform;
       socialCopies?: Record<SocialPlatform, string>;
-      reviewerSlaHours?: number;
-      managerSlaHours?: number;
+      reviewerSlaDays?: number;
+      managerSlaDays?: number;
+      reviewerDeadlineDate?: string | null;
+      managerDeadlineDate?: string | null;
     }) => {
-      const reviewerSlaHours = params.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS;
-      const managerSlaHours = params.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS;
+      const reviewerSlaDays = params.reviewerSlaDays ?? DEFAULT_FEEDBACK_SLA_DAYS;
+      const managerSlaDays = params.managerSlaDays ?? DEFAULT_APPROVAL_SLA_DAYS;
+      const reviewerDeadlineDate = params.reviewerDeadlineDate ?? null;
+      const managerDeadlineDate = params.managerDeadlineDate ?? null;
       const dispatchTime = Date.now();
 
       const task = createWorkspaceTask({
@@ -326,8 +332,10 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
         managerId: params.managerId,
         socialPlatform: params.socialPlatform,
         socialCopies: params.socialCopies,
-        reviewerSlaHours,
-        managerSlaHours,
+        reviewerSlaDays,
+        managerSlaDays,
+        reviewerDeadlineDate,
+        managerDeadlineDate,
       });
       addWorkspaceTask(task);
       setActiveTaskId(task.id);
@@ -351,10 +359,20 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
         splitViewActive: false,
         simulationStartedAt: null,
         managerDueAt: null,
-        reviewerSlaHours,
-        managerSlaHours,
-        reviewerDueAt: computeDeadlineFromHours(reviewerSlaHours, dispatchTime),
-        managerApprovalDueAt: computeDeadlineFromHours(managerSlaHours, dispatchTime),
+        reviewerSlaDays,
+        managerSlaDays,
+        reviewerDeadlineDate,
+        managerDeadlineDate,
+        reviewerDueAt: resolvePipelineDeadline({
+          days: reviewerSlaDays,
+          customDate: reviewerDeadlineDate,
+          from: dispatchTime,
+        }),
+        managerApprovalDueAt: resolvePipelineDeadline({
+          days: managerSlaDays,
+          customDate: managerDeadlineDate,
+          from: dispatchTime,
+        }),
         feedbackProvidedAt: null,
         reviewerApprovedAt: null,
         managerApprovedAt: null,
@@ -510,27 +528,61 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
     [persist]
   );
 
-  const setReviewerSlaHours = useCallback(
-    (reviewerSlaHours: number) =>
+  const setReviewerSlaDays = useCallback(
+    (reviewerSlaDays: number) =>
       persist((prev) => ({
         ...prev,
-        reviewerSlaHours,
+        reviewerSlaDays,
+        reviewerDeadlineDate: null,
         reviewerDueAt:
           prev.runStatus === "idle" || prev.runStatus === "dispatched"
-            ? computeDeadlineFromHours(reviewerSlaHours)
+            ? resolvePipelineDeadline({ days: reviewerSlaDays })
             : prev.reviewerDueAt,
       })),
     [persist]
   );
 
-  const setManagerSlaHours = useCallback(
-    (managerSlaHours: number) =>
+  const setManagerSlaDays = useCallback(
+    (managerSlaDays: number) =>
       persist((prev) => ({
         ...prev,
-        managerSlaHours,
+        managerSlaDays,
+        managerDeadlineDate: null,
         managerApprovalDueAt:
           prev.runStatus === "idle" || prev.runStatus === "dispatched"
-            ? computeDeadlineFromHours(managerSlaHours)
+            ? resolvePipelineDeadline({ days: managerSlaDays })
+            : prev.managerApprovalDueAt,
+      })),
+    [persist]
+  );
+
+  const setReviewerDeadlineDate = useCallback(
+    (reviewerDeadlineDate: string | null) =>
+      persist((prev) => ({
+        ...prev,
+        reviewerDeadlineDate,
+        reviewerDueAt:
+          prev.runStatus === "idle" || prev.runStatus === "dispatched"
+            ? resolvePipelineDeadline({
+                days: prev.reviewerSlaDays,
+                customDate: reviewerDeadlineDate,
+              })
+            : prev.reviewerDueAt,
+      })),
+    [persist]
+  );
+
+  const setManagerDeadlineDate = useCallback(
+    (managerDeadlineDate: string | null) =>
+      persist((prev) => ({
+        ...prev,
+        managerDeadlineDate,
+        managerApprovalDueAt:
+          prev.runStatus === "idle" || prev.runStatus === "dispatched"
+            ? resolvePipelineDeadline({
+                days: prev.managerSlaDays,
+                customDate: managerDeadlineDate,
+              })
             : prev.managerApprovalDueAt,
       })),
     [persist]
@@ -571,8 +623,10 @@ export function usePressReleasePipeline(options: UsePressReleasePipelineOptions 
     completeProcess,
     setReviewerId,
     setManagerId,
-    setReviewerSlaHours,
-    setManagerSlaHours,
+    setReviewerSlaDays,
+    setManagerSlaDays,
+    setReviewerDeadlineDate,
+    setManagerDeadlineDate,
     setFeedbackExpanded,
     toggleFeedbackLogEntry,
     updateDraftText,

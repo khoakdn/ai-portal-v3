@@ -1,11 +1,17 @@
 import type { PipelineAssigneeId } from "@/lib/demo/content-pipeline-simulator";
 import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
 
+export const DEADLINE_DAY_OPTIONS = [1, 2, 3, 5, 7] as const;
+export const DEFAULT_FEEDBACK_SLA_DAYS = 2;
+export const DEFAULT_APPROVAL_SLA_DAYS = 3;
+export const DEADLINE_END_HOUR = 17;
+
+/** @deprecated Legacy hour-based defaults — migrated to days on load */
 export const DEFAULT_FEEDBACK_SLA_HOURS = 24;
+/** @deprecated Legacy hour-based defaults — migrated to days on load */
 export const DEFAULT_APPROVAL_SLA_HOURS = 48;
 
-export const FEEDBACK_SLA_OPTIONS = [12, 24, 48] as const;
-export const APPROVAL_SLA_OPTIONS = [24, 48, 72] as const;
+export type DeadlineDayOption = (typeof DEADLINE_DAY_OPTIONS)[number];
 
 export interface PipelineFeedbackEntry {
   id: string;
@@ -50,8 +56,48 @@ export function formatDeadlineDateTime(date: Date | number): string {
   });
 }
 
-export function computeDeadlineFromHours(hours: number, from: Date | number = Date.now()): number {
-  return new Date(from).getTime() + hours * 60 * 60 * 1000;
+export function formatDaysLabel(days: number): string {
+  return days === 1 ? "1 Day" : `${days} Days`;
+}
+
+export function toDateInputValue(date: Date | number = Date.now()): string {
+  const value = new Date(date);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function computeDeadlineFromDays(
+  days: number,
+  from: Date | number = Date.now()
+): number {
+  const target = new Date(from);
+  target.setDate(target.getDate() + days);
+  target.setHours(DEADLINE_END_HOUR, 0, 0, 0);
+  return target.getTime();
+}
+
+export function computeDeadlineFromDateInput(dateStr: string): number {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day, DEADLINE_END_HOUR, 0, 0, 0).getTime();
+}
+
+export function resolvePipelineDeadline(params: {
+  days: number;
+  customDate?: string | null;
+  from?: Date | number;
+}): number {
+  if (params.customDate) {
+    return computeDeadlineFromDateInput(params.customDate);
+  }
+  return computeDeadlineFromDays(params.days, params.from);
+}
+
+/** Migrate legacy hour values to whole-day increments */
+export function migrateHoursToDays(hours?: number | null, fallback = DEFAULT_FEEDBACK_SLA_DAYS): number {
+  if (!hours || hours <= 0) return fallback;
+  return Math.max(1, Math.round(hours / 24));
 }
 
 export function getAssigneeInitials(name: string): string {

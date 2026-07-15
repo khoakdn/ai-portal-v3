@@ -5,8 +5,9 @@ import type {
 } from "@/lib/demo/content-pipeline-simulator";
 import type { PipelineFeedbackEntry } from "@/lib/demo/pipeline-tracking";
 import {
-  DEFAULT_APPROVAL_SLA_HOURS,
-  DEFAULT_FEEDBACK_SLA_HOURS,
+  DEFAULT_APPROVAL_SLA_DAYS,
+  DEFAULT_FEEDBACK_SLA_DAYS,
+  migrateHoursToDays,
 } from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
 import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
@@ -33,8 +34,10 @@ export interface PressReleasePipelineState {
   draftLocked: boolean;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
-  reviewerSlaHours: number;
-  managerSlaHours: number;
+  reviewerSlaDays: number;
+  managerSlaDays: number;
+  reviewerDeadlineDate: string | null;
+  managerDeadlineDate: string | null;
   reviewerDueAt: number | null;
   managerApprovalDueAt: number | null;
   feedbackProvidedAt: string | null;
@@ -65,8 +68,10 @@ export const DEFAULT_PIPELINE_STATE: PressReleasePipelineState = {
   draftLocked: false,
   simulationStartedAt: null,
   managerDueAt: null,
-  reviewerSlaHours: DEFAULT_FEEDBACK_SLA_HOURS,
-  managerSlaHours: DEFAULT_APPROVAL_SLA_HOURS,
+  reviewerSlaDays: DEFAULT_FEEDBACK_SLA_DAYS,
+  managerSlaDays: DEFAULT_APPROVAL_SLA_DAYS,
+  reviewerDeadlineDate: null,
+  managerDeadlineDate: null,
   reviewerDueAt: null,
   managerApprovalDueAt: null,
   feedbackProvidedAt: null,
@@ -85,8 +90,25 @@ export function loadPipelineState(): PressReleasePipelineState | null {
   try {
     const raw = window.localStorage.getItem(PR_PIPELINE_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<PressReleasePipelineState>;
-    return { ...DEFAULT_PIPELINE_STATE, ...parsed };
+    const parsed = JSON.parse(raw) as Partial<
+      PressReleasePipelineState & {
+        reviewerSlaHours?: number;
+        managerSlaHours?: number;
+      }
+    >;
+    return {
+      ...DEFAULT_PIPELINE_STATE,
+      ...parsed,
+      reviewerSlaDays:
+        parsed.reviewerSlaDays ??
+        migrateHoursToDays(parsed.reviewerSlaHours, DEFAULT_FEEDBACK_SLA_DAYS),
+      managerSlaDays:
+        parsed.managerSlaDays ??
+        migrateHoursToDays(parsed.managerSlaHours, DEFAULT_APPROVAL_SLA_DAYS),
+      reviewerDeadlineDate: parsed.reviewerDeadlineDate ?? null,
+      managerDeadlineDate: parsed.managerDeadlineDate ?? null,
+      feedbackLog: parsed.feedbackLog ?? [],
+    };
   } catch {
     return null;
   }

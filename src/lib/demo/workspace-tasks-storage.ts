@@ -6,10 +6,11 @@ import {
   type PipelineStepStatus,
 } from "@/lib/demo/content-pipeline-simulator";
 import {
-  DEFAULT_APPROVAL_SLA_HOURS,
-  DEFAULT_FEEDBACK_SLA_HOURS,
-  computeDeadlineFromHours,
+  DEFAULT_APPROVAL_SLA_DAYS,
+  DEFAULT_FEEDBACK_SLA_DAYS,
   createFeedbackLogEntry,
+  migrateHoursToDays,
+  resolvePipelineDeadline,
   type PipelineFeedbackEntry,
 } from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
@@ -46,8 +47,10 @@ export interface WorkspaceTask {
   socialCopies?: Record<SocialPlatform, string>;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
-  reviewerSlaHours: number;
-  managerSlaHours: number;
+  reviewerSlaDays: number;
+  managerSlaDays: number;
+  reviewerDeadlineDate: string | null;
+  managerDeadlineDate: string | null;
   reviewerDueAt: number | null;
   managerApprovalDueAt: number | null;
   feedbackProvidedAt: string | null;
@@ -70,16 +73,20 @@ export function createWorkspaceTask(params: {
   managerId?: PipelineAssigneeId;
   socialPlatform?: SocialPlatform;
   socialCopies?: Record<SocialPlatform, string>;
-  reviewerSlaHours?: number;
-  managerSlaHours?: number;
+  reviewerSlaDays?: number;
+  managerSlaDays?: number;
+  reviewerDeadlineDate?: string | null;
+  managerDeadlineDate?: string | null;
 }): WorkspaceTask {
   const defaults = getDefaultAssigneesForTaskType(params.type);
   const reviewerId = params.reviewerId ?? defaults.reviewerId;
   const managerId = params.managerId ?? defaults.managerId;
   const reviewer = getPipelineAssignee(reviewerId);
   const manager = getPipelineAssignee(managerId);
-  const reviewerSlaHours = params.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS;
-  const managerSlaHours = params.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS;
+  const reviewerSlaDays = params.reviewerSlaDays ?? DEFAULT_FEEDBACK_SLA_DAYS;
+  const managerSlaDays = params.managerSlaDays ?? DEFAULT_APPROVAL_SLA_DAYS;
+  const reviewerDeadlineDate = params.reviewerDeadlineDate ?? null;
+  const managerDeadlineDate = params.managerDeadlineDate ?? null;
   const dispatchTime = Date.now();
 
   return {
@@ -101,10 +108,20 @@ export function createWorkspaceTask(params: {
     socialCopies: params.socialCopies,
     simulationStartedAt: null,
     managerDueAt: null,
-    reviewerSlaHours,
-    managerSlaHours,
-    reviewerDueAt: computeDeadlineFromHours(reviewerSlaHours, dispatchTime),
-    managerApprovalDueAt: computeDeadlineFromHours(managerSlaHours, dispatchTime),
+    reviewerSlaDays,
+    managerSlaDays,
+    reviewerDeadlineDate,
+    managerDeadlineDate,
+    reviewerDueAt: resolvePipelineDeadline({
+      days: reviewerSlaDays,
+      customDate: reviewerDeadlineDate,
+      from: dispatchTime,
+    }),
+    managerApprovalDueAt: resolvePipelineDeadline({
+      days: managerSlaDays,
+      customDate: managerDeadlineDate,
+      from: dispatchTime,
+    }),
     feedbackProvidedAt: null,
     reviewerApprovedAt: null,
     managerApprovedAt: null,
@@ -122,8 +139,24 @@ export function loadWorkspaceTasks(): WorkspaceTask[] {
   try {
     const raw = window.localStorage.getItem(WORKSPACE_TASKS_STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as WorkspaceTask[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as Array<WorkspaceTask & {
+      reviewerSlaHours?: number;
+      managerSlaHours?: number;
+    }>;
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((task) => ({
+      ...task,
+      reviewerSlaDays:
+        task.reviewerSlaDays ??
+        migrateHoursToDays(task.reviewerSlaHours, DEFAULT_FEEDBACK_SLA_DAYS),
+      managerSlaDays:
+        task.managerSlaDays ??
+        migrateHoursToDays(task.managerSlaHours, DEFAULT_APPROVAL_SLA_DAYS),
+      reviewerDeadlineDate: task.reviewerDeadlineDate ?? null,
+      managerDeadlineDate: task.managerDeadlineDate ?? null,
+      feedbackLog: task.feedbackLog ?? [],
+    }));
   } catch {
     return [];
   }
@@ -227,8 +260,10 @@ export function syncWorkspaceTaskFromPipeline(params: {
   managerStatus: PipelineStepStatus;
   simulationStartedAt: number | null;
   managerDueAt: number | null;
-  reviewerSlaHours: number;
-  managerSlaHours: number;
+  reviewerSlaDays: number;
+  managerSlaDays: number;
+  reviewerDeadlineDate: string | null;
+  managerDeadlineDate: string | null;
   reviewerDueAt: number | null;
   managerApprovalDueAt: number | null;
   feedbackProvidedAt: string | null;
@@ -258,8 +293,10 @@ export function syncWorkspaceTaskFromPipeline(params: {
     status,
     simulationStartedAt: params.simulationStartedAt,
     managerDueAt: params.managerDueAt,
-    reviewerSlaHours: params.reviewerSlaHours,
-    managerSlaHours: params.managerSlaHours,
+    reviewerSlaDays: params.reviewerSlaDays,
+    managerSlaDays: params.managerSlaDays,
+    reviewerDeadlineDate: params.reviewerDeadlineDate,
+    managerDeadlineDate: params.managerDeadlineDate,
     reviewerDueAt: params.reviewerDueAt,
     managerApprovalDueAt: params.managerApprovalDueAt,
     feedbackProvidedAt: params.feedbackProvidedAt,
@@ -324,8 +361,20 @@ export function workspaceTaskToPipelineFields(task: WorkspaceTask) {
     managerStatus: mapPipelineManagerStatus(task.managerStatus, reviewerApproved),
     simulationStartedAt: task.simulationStartedAt,
     managerDueAt: task.managerDueAt,
-    reviewerSlaHours: task.reviewerSlaHours ?? DEFAULT_FEEDBACK_SLA_HOURS,
-    managerSlaHours: task.managerSlaHours ?? DEFAULT_APPROVAL_SLA_HOURS,
+    reviewerSlaDays:
+      task.reviewerSlaDays ??
+      migrateHoursToDays(
+        (task as WorkspaceTask & { reviewerSlaHours?: number }).reviewerSlaHours,
+        DEFAULT_FEEDBACK_SLA_DAYS
+      ),
+    managerSlaDays:
+      task.managerSlaDays ??
+      migrateHoursToDays(
+        (task as WorkspaceTask & { managerSlaHours?: number }).managerSlaHours,
+        DEFAULT_APPROVAL_SLA_DAYS
+      ),
+    reviewerDeadlineDate: task.reviewerDeadlineDate ?? null,
+    managerDeadlineDate: task.managerDeadlineDate ?? null,
     reviewerDueAt: task.reviewerDueAt ?? null,
     managerApprovalDueAt: task.managerApprovalDueAt ?? null,
     feedbackProvidedAt: task.feedbackProvidedAt ?? null,

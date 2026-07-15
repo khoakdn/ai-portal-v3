@@ -44,7 +44,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ContentPipelineWorkflow } from "@/components/shared/content-pipeline-workflow";
+import { ContentPipelineProgressView } from "@/components/shared/content-pipeline-progress-view";
 import { usePressReleasePipeline } from "@/hooks/use-press-release-pipeline";
+import { PIPELINE_REVIEWER_FEEDBACK } from "@/lib/demo/content-pipeline-simulator";
 import {
   improveDemoDraft,
   MOCK_OPTIMIZE_DELAY_MS,
@@ -813,12 +815,31 @@ function ReviewPhase({
   optimizeHighlightClassName,
   businessUnit,
 }: ReviewPhaseProps) {
-  const { isDispatched } = usePressReleasePipeline({
+  const { isDispatched, isSplitViewActive } = usePressReleasePipeline({
     draftText,
     title,
     businessUnit,
+    taskType: "Press Release",
+    feedbackText: PIPELINE_REVIEWER_FEEDBACK,
   });
   const wordCount = draftText.trim() ? draftText.trim().split(/\s+/).length : 0;
+
+  if (isSplitViewActive) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white px-6 py-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 rounded-full border border-[#0087DC]/30 bg-[#0087DC]/10 px-3 py-1 text-[12px] font-semibold text-[#005a94]">
+              <Eye className="h-3.5 w-3.5" />
+              Press Release Workflow Progress View
+            </span>
+            <span className="text-sm text-slate-500">{title}</span>
+          </div>
+        </div>
+        <ContentPipelineProgressView onDraftChange={onDraftChange} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -886,6 +907,9 @@ function ReviewPhase({
           onDraftChange={onDraftChange}
           title={title}
           businessUnit={businessUnit}
+          taskType="Press Release"
+          feedbackText={PIPELINE_REVIEWER_FEEDBACK}
+          progressNavigation="inline"
         />
 
         <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">

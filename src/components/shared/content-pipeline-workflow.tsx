@@ -4,6 +4,7 @@ import { useEffect, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Clock3, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -20,10 +21,11 @@ import {
   type PipelineAssigneeId,
 } from "@/lib/demo/content-pipeline-simulator";
 import {
-  APPROVAL_SLA_OPTIONS,
-  FEEDBACK_SLA_OPTIONS,
-  computeDeadlineFromHours,
-  formatDeadlineDate,
+  DEADLINE_DAY_OPTIONS,
+  formatDaysLabel,
+  formatDeadlineDateTime,
+  resolvePipelineDeadline,
+  toDateInputValue,
 } from "@/lib/demo/pipeline-tracking";
 import type { SocialPlatform } from "@/lib/demo/social-media-formats";
 import type { WorkspaceTaskType } from "@/lib/demo/workspace-tasks-storage";
@@ -46,11 +48,11 @@ interface ContentPipelineWorkflowProps {
 
 function SlaDeadlineBadge({
   label,
-  hours,
+  summary,
   deadline,
 }: {
   label: string;
-  hours: number;
+  summary: string;
   deadline: string;
 }) {
   return (
@@ -58,9 +60,80 @@ function SlaDeadlineBadge({
       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
       <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
         <Clock3 className="h-3.5 w-3.5 text-[#0087DC]" />
-        {hours}h SLA
+        {summary}
       </p>
       <p className="mt-0.5 text-[11px] text-slate-500">Deadline: {deadline}</p>
+    </div>
+  );
+}
+
+function DeadlineConfigurator({
+  idPrefix,
+  label,
+  days,
+  customDate,
+  dueAt,
+  onDaysChange,
+  onCustomDateChange,
+}: {
+  idPrefix: string;
+  label: string;
+  days: number;
+  customDate: string | null;
+  dueAt: number | null;
+  onDaysChange: (days: number) => void;
+  onCustomDateChange: (date: string | null) => void;
+}) {
+  const selectValue = customDate ? "custom" : String(days);
+  const deadlinePreview = formatDeadlineDateTime(
+    dueAt ?? resolvePipelineDeadline({ days, customDate })
+  );
+  const summary = customDate
+    ? `Custom · ${new Date(customDate).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })}`
+    : formatDaysLabel(days);
+
+  return (
+    <div className="space-y-2 pt-1">
+      <Label htmlFor={`${idPrefix}-deadline-select`}>{label}</Label>
+      <Select
+        value={selectValue}
+        onValueChange={(value) => {
+          if (value === "custom") {
+            onCustomDateChange(toDateInputValue());
+            return;
+          }
+          onCustomDateChange(null);
+          onDaysChange(Number(value));
+        }}
+      >
+        <SelectTrigger id={`${idPrefix}-deadline-select`}>
+          <SelectValue placeholder="Choose deadline" />
+        </SelectTrigger>
+        <SelectContent>
+          {DEADLINE_DAY_OPTIONS.map((optionDays) => (
+            <SelectItem key={`${idPrefix}-${optionDays}`} value={String(optionDays)}>
+              {formatDaysLabel(optionDays)}
+            </SelectItem>
+          ))}
+          <SelectItem value="custom">Custom date…</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {customDate && (
+        <Input
+          id={`${idPrefix}-deadline-date`}
+          type="date"
+          value={customDate}
+          min={toDateInputValue()}
+          onChange={(event) => onCustomDateChange(event.target.value || null)}
+        />
+      )}
+
+      <SlaDeadlineBadge label={label} summary={summary} deadline={deadlinePreview} />
     </div>
   );
 }
@@ -91,8 +164,10 @@ export function ContentPipelineWorkflow({
     openProgressView,
     setReviewerId,
     setManagerId,
-    setReviewerSlaHours,
-    setManagerSlaHours,
+    setReviewerSlaDays,
+    setManagerSlaDays,
+    setReviewerDeadlineDate,
+    setManagerDeadlineDate,
     syncDraftMeta,
   } = usePressReleasePipeline({ draftText, title, businessUnit, taskType, feedbackText });
 
@@ -105,18 +180,26 @@ export function ContentPipelineWorkflow({
 
   const reviewerDeadlinePreview = useMemo(
     () =>
-      formatDeadlineDate(
-        state.reviewerDueAt ?? computeDeadlineFromHours(state.reviewerSlaHours)
+      formatDeadlineDateTime(
+        state.reviewerDueAt ??
+          resolvePipelineDeadline({
+            days: state.reviewerSlaDays,
+            customDate: state.reviewerDeadlineDate,
+          })
       ),
-    [state.reviewerDueAt, state.reviewerSlaHours]
+    [state.reviewerDueAt, state.reviewerSlaDays, state.reviewerDeadlineDate]
   );
 
   const managerDeadlinePreview = useMemo(
     () =>
-      formatDeadlineDate(
-        state.managerApprovalDueAt ?? computeDeadlineFromHours(state.managerSlaHours)
+      formatDeadlineDateTime(
+        state.managerApprovalDueAt ??
+          resolvePipelineDeadline({
+            days: state.managerSlaDays,
+            customDate: state.managerDeadlineDate,
+          })
       ),
-    [state.managerApprovalDueAt, state.managerSlaHours]
+    [state.managerApprovalDueAt, state.managerSlaDays, state.managerDeadlineDate]
   );
 
   useEffect(() => {
@@ -152,8 +235,10 @@ export function ContentPipelineWorkflow({
         feedbackText,
         socialPlatform,
         socialCopies,
-        reviewerSlaHours: state.reviewerSlaHours,
-        managerSlaHours: state.managerSlaHours,
+        reviewerSlaDays: state.reviewerSlaDays,
+        managerSlaDays: state.managerSlaDays,
+        reviewerDeadlineDate: state.reviewerDeadlineDate,
+        managerDeadlineDate: state.managerDeadlineDate,
       });
     });
   }
@@ -191,12 +276,20 @@ export function ContentPipelineWorkflow({
           <div className="mt-4 grid w-full max-w-sm gap-2 text-left">
             <SlaDeadlineBadge
               label={`${reviewer.name} · Feedback`}
-              hours={state.reviewerSlaHours}
+              summary={
+                state.reviewerDeadlineDate
+                  ? "Custom date"
+                  : formatDaysLabel(state.reviewerSlaDays)
+              }
               deadline={reviewerDeadlinePreview}
             />
             <SlaDeadlineBadge
               label={`${manager.name} · Approval`}
-              hours={state.managerSlaHours}
+              summary={
+                state.managerDeadlineDate
+                  ? "Custom date"
+                  : formatDaysLabel(state.managerSlaDays)
+              }
               deadline={managerDeadlinePreview}
             />
           </div>
@@ -247,29 +340,15 @@ export function ContentPipelineWorkflow({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-slate-400">{reviewer.roleTag}</p>
-          <div className="space-y-2 pt-1">
-            <Label htmlFor="pipeline-reviewer-sla">Feedback SLA</Label>
-            <Select
-              value={String(state.reviewerSlaHours)}
-              onValueChange={(value) => setReviewerSlaHours(Number(value))}
-            >
-              <SelectTrigger id="pipeline-reviewer-sla">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FEEDBACK_SLA_OPTIONS.map((hours) => (
-                  <SelectItem key={`reviewer-sla-${hours}`} value={String(hours)}>
-                    {hours} hours
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <SlaDeadlineBadge
-              label="Feedback SLA"
-              hours={state.reviewerSlaHours}
-              deadline={reviewerDeadlinePreview}
-            />
-          </div>
+          <DeadlineConfigurator
+            idPrefix="reviewer"
+            label="Feedback Deadline"
+            days={state.reviewerSlaDays}
+            customDate={state.reviewerDeadlineDate}
+            dueAt={state.reviewerDueAt}
+            onDaysChange={setReviewerSlaDays}
+            onCustomDateChange={setReviewerDeadlineDate}
+          />
         </div>
 
         <div className="space-y-2">
@@ -290,29 +369,15 @@ export function ContentPipelineWorkflow({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-slate-400">{manager.roleTag}</p>
-          <div className="space-y-2 pt-1">
-            <Label htmlFor="pipeline-manager-sla">Approval SLA</Label>
-            <Select
-              value={String(state.managerSlaHours)}
-              onValueChange={(value) => setManagerSlaHours(Number(value))}
-            >
-              <SelectTrigger id="pipeline-manager-sla">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {APPROVAL_SLA_OPTIONS.map((hours) => (
-                  <SelectItem key={`manager-sla-${hours}`} value={String(hours)}>
-                    {hours} hours
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <SlaDeadlineBadge
-              label="Approval SLA"
-              hours={state.managerSlaHours}
-              deadline={managerDeadlinePreview}
-            />
-          </div>
+          <DeadlineConfigurator
+            idPrefix="manager"
+            label="Approval Deadline"
+            days={state.managerSlaDays}
+            customDate={state.managerDeadlineDate}
+            dueAt={state.managerApprovalDueAt}
+            onDaysChange={setManagerSlaDays}
+            onCustomDateChange={setManagerDeadlineDate}
+          />
         </div>
       </div>
 
